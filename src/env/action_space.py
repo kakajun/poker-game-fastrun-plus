@@ -20,10 +20,10 @@ class ActionSpace:
         self.size = 0
         
         if not self.load():
-            print("Building Action Space (this may take a while)...")
+            # print("Building Action Space (this may take a while)...")
             self.build()
             self.save()
-        print(f"Action Space ready. Size: {self.size}")
+        # print(f"Action Space ready. Size: {self.size}")
 
     def get_id(self, play: Play) -> int:
         """获取动作 ID (Abstract)"""

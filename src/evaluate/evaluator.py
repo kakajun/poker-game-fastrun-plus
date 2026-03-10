@@ -4,14 +4,15 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from typing import List, Dict, Any
-from sb3_contrib import MaskablePPO
-from stable_baselines3.common.monitor import Monitor
 
 from src.env.poker_env import PokerEnv
 from src.env.single_agent_wrapper import SingleAgentWrapper
-from src.agent.random_agent import RandomAgent
-from src.agent.heuristic_agent import HeuristicAgent
+from src.agent.model_agent import ModelAgent
 from src.core.hand_type import HandType
+
+# 2. 设置环境变量，必须在导入 torch 之前
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
 
 class ModelEvaluator:
     """
@@ -27,36 +28,25 @@ class ModelEvaluator:
         self.n_episodes = n_episodes
         self.results = []
 
-    def evaluate_model(self, model_path: str, model_name: str, opponent_type: str = "random"):
+    def evaluate_model(self, model_path: str, model_name: str, opponent_path: str):
         """
-        评估单个模型。
-        opponent_type: "random" 或 "heuristic"
+        评估模型之间的对弈。
+        model_path: 待评估模型路径
+        opponent_path: 对手模型路径
         """
-        print(f"\n--- 正在评估模型: {model_name} 对战 {opponent_type} ---")
+        opp_name = os.path.basename(opponent_path)
+        print(f"\n--- 正在评估: {model_name} VS {opp_name} ---")
 
-        # 1. 初始化环境与对手
+        # 1. 初始化环境与模型对手
         base_env = PokerEnv()
-        if opponent_type == "random":
-            opponents = [RandomAgent(base_env.action_space.n), RandomAgent(base_env.action_space.n)]
-        else:
-            opponents = [HeuristicAgent(), HeuristicAgent()]
-
+        opponents = [ModelAgent(opponent_path), ModelAgent(opponent_path)]
         env = SingleAgentWrapper(base_env, opponents=opponents)
 
-        # 2. 加载模型并检查维度
+        # 2. 初始化待评估 Agent
         try:
-            model = MaskablePPO.load(model_path)
-            model_obs_shape = model.observation_space.shape
-            env_obs_shape = env.observation_space.shape
-
-            if model_obs_shape != env_obs_shape:
-                print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
-                return None
-            
-            # 重新关联环境以便后续评估 (如果需要)
-            model.set_env(env)
+            agent = ModelAgent(model_path, deterministic=True)
         except Exception as e:
-            print(f"无法加载模型 {model_path}: {e}")
+            print(f"无法初始化 Agent {model_name}: {e}")
             return None
 
         # 3. 运行评估循环
@@ -87,21 +77,21 @@ class ModelEvaluator:
             stats["initial_hand_strength"].append(strength)
 
             while not (terminated or truncated):
-                # 获取 mask 并预测
-                mask = env.action_masks()
+                # 获取 mask
+                mask = info.get("action_mask")
 
                 # 检查顶大规则机会 (下家报单且轮到我出牌)
                 next_player = (env.unwrapped.game.current_player + 1) % 3
-                is_reported_single = (len(env.unwrapped.game.hands[next_player]) == 1)
+                is_reported_single = (
+                    len(env.unwrapped.game.hands[next_player]) == 1)
 
-                action, _ = model.predict(obs, action_masks=mask, deterministic=True)
-
-                if isinstance(action, np.ndarray):
-                    action = action.item()
+                # 使用 Agent 行动
+                action = agent.act(obs, mask, env.unwrapped.game)
 
                 # 评估策略质量: 顶大规则执行情况
                 if is_reported_single:
-                    play = env.unwrapped.action_space_manager.get_action(action)
+                    play = env.unwrapped.action_space_manager.get_action(
+                        action)
                     if play and play.type == HandType.SINGLE:
                         stats["top_single_opportunities"] += 1
                         # 检查是否是手中最大的单张
@@ -136,7 +126,7 @@ class ModelEvaluator:
                 else:
                     stats["remain_cards_on_loss"].append(len(game.hands[0]))
             else:
-                # Truncated (通常是因为非法动作)
+                # Truncated
                 final_score = -100 - len(game.hands[0])
                 stats["remain_cards_on_loss"].append(len(game.hands[0]))
 
@@ -145,7 +135,7 @@ class ModelEvaluator:
         # 4. 计算最终指标
         summary = {
             "模型": model_name,
-            "对手": opponent_type,
+            "对手": opp_name,
             "胜率": stats["wins"] / stats["total_episodes"],
             "平均得分": np.mean(stats["scores"]),
             "获胜平均步数": np.mean(stats["steps_to_win"]) if stats["steps_to_win"] else 0,
@@ -157,11 +147,13 @@ class ModelEvaluator:
         }
 
         self.results.append(summary)
-        print(f"评估完成: 胜率 {summary['胜率']:.2%}, 平均分 {summary['平均得分']:.2f}, 顶大违规率 {summary['顶大违规率']:.2%}")
+        print(
+            f"评估完成: 胜率 {summary['胜率']:.2%}, 平均分 {summary['平均得分']:.2f}, 顶大违规率 {summary['顶大违规率']:.2%}")
         return summary
 
     def _calc_correlation(self, x, y):
-        if len(x) < 2: return 0
+        if len(x) < 2:
+            return 0
         try:
             return np.corrcoef(x, y)[0, 1]
         except:
@@ -169,13 +161,15 @@ class ModelEvaluator:
 
     def save_report(self, output_dir: str):
         """保存评估报告并绘图"""
-        if not self.results: return
+        if not self.results:
+            return
 
         df = pd.DataFrame(self.results)
         os.makedirs(output_dir, exist_ok=True)
 
         # 1. 保存 CSV
-        df.to_csv(os.path.join(output_dir, "eval_report.csv"), index=False, encoding='utf-8-sig')
+        df.to_csv(os.path.join(output_dir, "eval_report.csv"),
+                  index=False, encoding='utf-8-sig')
 
         # 2. 绘制多维度对比图
         plt.figure(figsize=(15, 10))
@@ -187,8 +181,10 @@ class ModelEvaluator:
         for opp in df["对手"].unique():
             sub = df[df["对手"] == opp]
             x = np.arange(len(sub))
-            plt.bar(x - 0.2, sub["胜率"] * 100, width=0.4, label=f"胜率 (vs {opp})")
-            plt.bar(x + 0.2, sub["春天率"] * 100, width=0.4, label=f"春天率 (vs {opp})")
+            plt.bar(x - 0.2, sub["胜率"] * 100,
+                    width=0.4, label=f"胜率 (vs {opp})")
+            plt.bar(x + 0.2, sub["春天率"] * 100,
+                    width=0.4, label=f"春天率 (vs {opp})")
         plt.xticks(np.arange(len(df["模型"].unique())), df["模型"].unique())
         plt.ylabel("百分比 (%)")
         plt.title("竞技表现 (胜率 & 春天率)")
@@ -207,8 +203,10 @@ class ModelEvaluator:
         for opp in df["对手"].unique():
             sub = df[df["对手"] == opp]
             x = np.arange(len(sub))
-            plt.bar(x - 0.2, sub["顶大违规率"] * 100, width=0.4, label=f"顶大违规率 (vs {opp})")
-            plt.bar(x + 0.2, sub["炸弹频率"] * 10, width=0.4, label=f"炸弹频率x10 (vs {opp})")
+            plt.bar(x - 0.2, sub["顶大违规率"] * 100,
+                    width=0.4, label=f"顶大违规率 (vs {opp})")
+            plt.bar(x + 0.2, sub["炸弹频率"] * 10, width=0.4,
+                    label=f"炸弹频率x10 (vs {opp})")
         plt.xticks(np.arange(len(df["模型"].unique())), df["模型"].unique())
         plt.ylabel("百分比 / 频率")
         plt.title("策略质量指标")
@@ -227,18 +225,49 @@ class ModelEvaluator:
 
         print(f"\n完整评估报告已生成至: {output_dir}")
 
+
 if __name__ == "__main__":
+    # 减少对局数以加快对比速度
     evaluator = ModelEvaluator(n_episodes=50)
 
-    # 查找 models 文件夹中的模型
     model_dir = "models"
-    models = [f for f in os.listdir(model_dir) if f.endswith(".zip")]
+    # 支持 PPO (.zip) 和 MCCFR (.pth, .pkl)
+    all_files = os.listdir(model_dir)
 
-    for m in models:
+    # 1. 定义基准模型 (通常是之前最强的 PPO)
+    benchmark_file = "ppo_poker_final.zip"
+    benchmark_path = os.path.join(model_dir, benchmark_file)
+
+    if not os.path.exists(benchmark_path):
+        # 如果找不到 Final PPO，选一个最新的 .zip
+        zips = [f for f in all_files if f.endswith(".zip")]
+        if zips:
+            benchmark_file = zips[0]
+            benchmark_path = os.path.join(model_dir, benchmark_file)
+        else:
+            print("错误: 找不到任何基准模型 (.zip)")
+            sys.exit(1)
+
+    # 2. 筛选待测评模型 (所有 .pth 和 .pkl)
+    test_models = [f for f in all_files if (f.endswith(
+        ".pth") or f.endswith(".pkl")) and f != benchmark_file]
+
+    print(f"=== 开始模型对弈测评 ===")
+    print(f"基准对手: {benchmark_file}")
+    print(f"待测模型: {test_models}")
+
+    for m in test_models:
         m_path = os.path.join(model_dir, m)
-        # 对战随机
-        evaluator.evaluate_model(m_path, m, opponent_type="random")
-        # 对战启发式
-        evaluator.evaluate_model(m_path, m, opponent_type="heuristic")
+        evaluator.evaluate_model(m_path, m, benchmark_path)
+
+    # 3. 如果有多个 .pth 模型，也可以进行它们之间的内战
+    pths = [f for f in test_models if f.endswith(".pth")]
+    if len(pths) >= 2:
+        print("\n--- 进行 MCCFR 模型内战 ---")
+        # 让最新的对战次新的
+        pths.sort(key=lambda x: os.path.getmtime(
+            os.path.join(model_dir, x)), reverse=True)
+        evaluator.evaluate_model(os.path.join(
+            model_dir, pths[0]), f"{pths[0]} (最新)", os.path.join(model_dir, pths[1]))
 
     evaluator.save_report("src/evaluate/reports")

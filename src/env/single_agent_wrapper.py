@@ -50,7 +50,8 @@ class SingleAgentWrapper(gym.Wrapper):
         if not os.path.exists(model_dir):
             return None
 
-        model_files = [f for f in os.listdir(model_dir) if f.endswith(".zip")]
+        # 支持 .zip (PPO) 和 .pth (MCCFR)
+        model_files = [f for f in os.listdir(model_dir) if f.endswith(".zip") or f.endswith(".pth")]
         if not model_files:
             return None
 

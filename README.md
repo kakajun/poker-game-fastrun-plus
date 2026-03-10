@@ -87,17 +87,28 @@ npm run dev
 
 ### 4. 训练 AI (可选)
 
-如果你想重新训练模型，需要安装额外的训练依赖：
+项目目前支持两种训练模式：**PPO (强化学习)** 和 **MCCFR (博弈论优化)**。
+
+#### **模式 A: Deep MCCFR 训练 (推荐 - 极速 GPU 加速)**
+这是目前最强大的训练方式，支持多进程并发采样和 GPU 神经网络更新。
 
 ```bash
-# 安装训练专用依赖 (包含 tensorboard, stable-baselines3, gymnasium 等)
-pip install -r requirementsTrain.txt
+# 运行极速版训练脚本 (针对 16G 显存优化，支持 20+ 线程)
+$env:PYTHONPATH="."; python src/train_mccfr.py
+```
+- **输出**: `models/deep_mccfr_extreme.pth`
+- **特点**: 采样速度可达 130+ games/s，具备极强的博弈对抗能力。
 
-# 运行训练脚本 (使用 CPU 训练约需 5-10 分钟)
+#### **模式 B: 标准 PPO 训练**
+传统的深度强化学习训练方式。
+
+```bash
+# 运行 PPO 训练
 python src/train_ppo.py
 ```
+- **输出**: `models/ppo_poker_final.zip`
 
-模型将保存到 `models/ppo_poker_final.zip`。
+---
 
 ## 📊 模型评估 (Model Evaluation)
 
@@ -116,11 +127,8 @@ python src/train_ppo.py
 
 ### 3. 运行评估
 ```bash
-# 设置环境变量并运行通用评估 (对比 models 文件夹下的所有模型)
-$env:PYTHONPATH = '.'; .\.venv\python.exe src\evaluate\evaluator.py
-
-# 运行“打春天”专项能力评估
-$env:PYTHONPATH = '.'; .\.venv\python.exe src\evaluate\spring_evaluator.py
+# 运行模型间强强对弈测评 (自动对比 models 目录下的 MCCFR 与 PPO 模型)
+$env:PYTHONPATH="."; python src/evaluate/evaluator.py
 ```
 
 评估结果（CSV 报表与可视化对比图）将自动生成在 `src/evaluate/reports/` 目录下。

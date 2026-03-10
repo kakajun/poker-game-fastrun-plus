@@ -36,8 +36,20 @@
 - **当前状态**: `SingleAgentWrapper` 默认使用 `RandomAgent` 作为对手进行训练。
 - **后续规划**: 引入自我对弈 (Self-Play)，即让模型与自身的历史版本进行对抗，以突破单纯模仿随机或固定规则的局限。
 
+## 算法演进：从 RL 到 MCCFR
+
+### 当前局限 (PPO)
+- **信息不完全性**：PPO 将对手视为环境的一部分，难以处理对手手牌的隐藏信息，容易被固定套路针对。
+- **收敛性**：在博弈场景下，PPO 难以保证收敛到纳什均衡，表现为策略波动大或陷入局部最优。
+
+### 新方案：MCCFR (Monte Carlo Counterfactual Regret Minimization)
+- **核心逻辑**：通过最小化累击遗憾（Regret）来逼近纳什均衡。
+- **信息集建模**：显式处理玩家视野内的已知信息，通过蒙特卡洛采样模拟对手可能的持牌情况。
+- **详细计划**：参见 [MCCFR_TRANSFORMATION_PLAN.md](file:///f:/git/poker-game-fastrun-plus/MCCFR_TRANSFORMATION_PLAN.md)。
+
 ## 风险与里程碑
 - ✅ **M1**: 训练脚手架搭建完成，支持 Maskable PPO。
 - ✅ **M2**: 实现 `HeuristicAgent` 基准线与多维度评估系统。
-- ⏳ **M3**: 优化超参数，针对 `HeuristicAgent` 达到 >50% 胜率。
+- ⏳ **M3**: 优化 PPO 超参数，针对 `HeuristicAgent` 达到 >50% 胜率。
 - ⏳ **M4**: 引入 Self-Play 提升博弈深度。
+- 🚀 **M5 (New)**: 引入 MCCFR 算法，处理不完全信息博弈，提升 AI 竞技上限。

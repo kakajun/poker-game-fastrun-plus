@@ -229,3 +229,44 @@ class Game:
         # 总分 = 基础分 + 炸弹分
         for i in range(3):
             self.scores[i] = base_scores[i] + self.bomb_scores[i]
+
+    def clone(self) -> 'Game':
+        """深度克隆当前游戏状态"""
+        import copy
+        # 这种方式比较慢，但最稳妥。如果性能成为瓶颈，可改为手动复制关键字段
+        new_game = copy.copy(self)
+        new_game.hands = [list(h) for h in self.hands]
+        new_game.cards_played_count = list(self.cards_played_count)
+        new_game.bomb_scores = list(self.bomb_scores)
+        new_game.played_card_ids = set(self.played_card_ids)
+        new_game.scores = list(self.scores)
+        # last_play 是 Play 对象，Play 对象通常是不可变的 (或我们不打算修改它)
+        # 如果 Play 内部引用了 Card，而 Card 又是引用，可能需要深度复制
+        # 但在 step 中我们是替换 last_play 而不是修改它
+        return new_game
+
+    def shuffle_other_hands(self, player_id: int):
+        """
+        重排除 player_id 以外其他玩家的手牌。
+        用于 MCCFR 蒙特卡洛采样：在 player_id 的信息集中，其他人的牌是未知的。
+        """
+        # 1. 收集所有未出且不在 player_id 手里的牌
+        all_unplayed_cards = []
+        # 从 Deck 中获取所有可能的牌
+        full_deck = Deck().cards
+        player_hand_ids = {c.id for c in self.hands[player_id]}
+
+        for card in full_deck:
+            if card.id not in self.played_card_ids and card.id not in player_hand_ids:
+                all_unplayed_cards.append(card)
+
+        # 2. 随机洗牌
+        random.shuffle(all_unplayed_cards)
+
+        # 3. 重新分配给其他玩家
+        other_players = [i for i in range(3) if i != player_id]
+        ptr = 0
+        for p in other_players:
+            count = len(self.hands[p])
+            self.hands[p] = sorted(all_unplayed_cards[ptr : ptr + count], reverse=True)
+            ptr += count
