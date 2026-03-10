@@ -1,0 +1,10 @@
+# 训练专用额外库 (Training specific extra libraries)
+tensorboard
+stable-baselines3
+sb3-contrib
+gymnasium
+shimmy
+matplotlib
+pandas
+tqdm
+rich

@@ -1,0 +1,21 @@
+name: poker-rl
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cpuonly
+  - pip:
+    - gymnasium
+    - stable-baselines3
+    - shimmy
+    - tensorboard
+    - tqdm
+    - rich
