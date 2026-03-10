@@ -1,10 +1,3 @@
-export enum Suit {
-  Spades = 'S',
-  Hearts = 'H',
-  Clubs = 'C',
-  Diamonds = 'D',
-}
-
 export enum Rank {
   Three = 3,
   Four = 4,
@@ -22,7 +15,6 @@ export enum Rank {
 }
 
 export interface Card {
-  suit: Suit;
   rank: Rank;
   id: string; // unique identifier for key
 }

@@ -1,64 +1,61 @@
+from .card import Card, Rank
 import random
-from typing import List, Tuple
-from src.core.card import Card, Rank, Suit
+from typing import Optional
 
 
 class Deck:
-    """扑克牌堆管理"""
+    """牌堆管理类"""
 
-    def __init__(self, seed: int = None):
-        self.cards: List[Card] = []
-        self.seed = seed
+    def __init__(self, seed: Optional[int] = None):
         if seed is not None:
             random.seed(seed)
+        self.cards = []
         self.build()
 
     def build(self):
         """
         构建跑得快专用的牌堆 (45张)
-        去掉大小王
-        3-Q (4张): 全保留
-        K (3张): 去掉方块K (Suit=0) -> 保留 Club(1), Heart(2), Spade(3)
-        A (1张): 保留黑桃A (Suit=3)
-        2 (1张): 保留红桃2 (Suit=2)
+        3-Q: 各 4 张 (共 40 张)
+        K: 3 张
+        A: 1 张
+        2: 1 张
         """
         self.cards = []
 
         # 3 - Q (3-12)
         for r in range(3, 13):
             rank = Rank(r)
-            for s in Suit:
-                self.cards.append(Card(rank, s))
+            for i in range(4):
+                self.cards.append(Card(rank, i))
 
-        # K (13) - 去掉方块K
-        self.cards.append(Card(Rank.KING, Suit.CLUB))
-        self.cards.append(Card(Rank.KING, Suit.HEART))
-        self.cards.append(Card(Rank.KING, Suit.SPADE))
+        # K (13) - 3 张
+        for i in range(3):
+            self.cards.append(Card(Rank.KING, i))
 
-        # A (14) - 保留黑桃A
-        self.cards.append(Card(Rank.ACE, Suit.SPADE))
+        # A (14) - 1 张
+        self.cards.append(Card(Rank.ACE, 0))
 
-        # 2 (15) - 保留红桃2
-        self.cards.append(Card(Rank.TWO, Suit.HEART))
+        # 2 (15) - 1 张
+        self.cards.append(Card(Rank.TWO, 0))
 
         # 校验数量
-        assert len(
-            self.cards) == 45, f"Deck size should be 45, but got {len(self.cards)}"
+        assert len(self.cards) == 45, f"Deck size should be 45, but got {len(self.cards)}"
 
     def shuffle(self):
         """洗牌"""
         random.shuffle(self.cards)
 
-    def deal(self) -> Tuple[List[Card], List[Card], List[Card]]:
-        """发牌，均分给3个玩家，每人15张"""
-        if len(self.cards) != 45:
-            raise ValueError("Deck must have 45 cards before dealing")
+    def deal(self, num_players: int = 3, cards_per_player: int = 15):
+        """发牌"""
+        if len(self.cards) < num_players * cards_per_player:
+            raise ValueError("Not enough cards in deck")
 
-        hand1 = sorted(self.cards[0:15])
-        hand2 = sorted(self.cards[15:30])
-        hand3 = sorted(self.cards[30:45])
+        hands = []
+        for i in range(num_players):
+            start = i * cards_per_player
+            end = start + cards_per_player
+            # 排序手牌
+            hand = sorted(self.cards[start:end])
+            hands.append(hand)
 
-        return hand1, hand2, hand3
-
-    def __repr__(self):
-        return f"Deck({len(self.cards)} cards)"
+        return hands

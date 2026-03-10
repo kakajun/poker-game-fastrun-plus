@@ -1,24 +1,11 @@
 import { defineStore } from 'pinia';
-import { Suit, Rank } from '../types';
+import { Rank } from '../types';
 import type { GameState, Player, Card, GameStatus } from '../types';
 import { gameApi, type GameStateModel, type CardModel } from '../api/game';
-
-// Adapter helpers
-function mapSuit(backendSuit: number): Suit {
-  // Backend: 0: Diamond, 1: Club, 2: Heart, 3: Spade
-  switch (backendSuit) {
-    case 0: return Suit.Diamonds;
-    case 1: return Suit.Clubs;
-    case 2: return Suit.Hearts;
-    case 3: return Suit.Spades;
-    default: return Suit.Spades;
-  }
-}
 
 function mapCard(c: CardModel): Card {
   return {
     rank: c.rank as Rank,
-    suit: mapSuit(c.suit),
     id: c.id.toString() // Convert int ID to string for frontend key
   };
 }

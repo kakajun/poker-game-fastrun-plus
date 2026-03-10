@@ -5,7 +5,6 @@ const API_BASE_URL = '/api'; // 使用 Vite 代理前缀
 // 后端数据模型定义 (参考后端 src/api/models.py)
 export interface CardModel {
   rank: number;
-  suit: number;
   id: number;
 }
 

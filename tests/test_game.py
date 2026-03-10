@@ -1,8 +1,9 @@
 from src.core.hand_type import HandType, Play
-from src.core.card import Card, Rank, Suit
+from src.core.card import Card, Rank
 from src.core.game import Game
 import sys
 import os
+
 # Force add root directory
 sys.path.insert(0, r"f:\git\poker-game-fastrun")
 
@@ -17,18 +18,15 @@ def test_game_basic():
     assert len(game.hands[1]) == 15
     assert len(game.hands[2]) == 15
 
-    # Check Heart 3
-    h3 = Card(Rank.THREE, Suit.HEART)
+    # Check Random Start Player
     start_player = game.current_player
-    assert h3 in game.hands[start_player]
+    assert 0 <= start_player <= 2
 
     print(f"Start Player: {start_player}")
 
     # Check Legal Actions
     actions = game.get_legal_actions()
-    # Must contain H3
-    for a in actions:
-        assert h3 in a.cards
+    assert len(actions) > 0
 
     print("Game Basic Passed!")
 
@@ -38,25 +36,16 @@ def test_game_flow():
     game = Game(seed=42)
     start_player = game.current_player
 
-    # Player 0 plays H3 (Single)
-    h3 = Card(Rank.THREE, Suit.HEART)
-    play = Play(HandType.SINGLE, [h3], length=1, max_rank=Rank.THREE)
+    # Player plays a Single
+    hand = game.hands[start_player]
+    card = hand[0]
+    play = Play(HandType.SINGLE, [card], length=1, max_rank=card.rank)
 
     is_over, events = game.step(play)
     assert not is_over
     assert game.current_player == (start_player + 1) % 3
     assert game.last_play == play
-    assert h3 not in game.hands[start_player]
-
-    # Player 1 actions
-    # Should beat H3
-    actions = game.get_legal_actions()
-    if actions[0].type == HandType.PASS:
-        print("Player 1 passed")
-        game.step(actions[0])
-    else:
-        print(f"Player 1 plays: {actions[0]}")
-        game.step(actions[0])
+    assert card not in game.hands[start_player]
 
     print("Game Flow Passed!")
 
@@ -69,14 +58,14 @@ def test_bomb_score():
     # P1: 5
     # P2: 6
     game.hands[0] = [
-        Card(Rank.THREE, Suit.DIAMOND),
-        Card(Rank.THREE, Suit.CLUB),
-        Card(Rank.THREE, Suit.HEART),
-        Card(Rank.THREE, Suit.SPADE),
-        Card(Rank.FOUR, Suit.DIAMOND)
+        Card(Rank.THREE, 0),
+        Card(Rank.THREE, 1),
+        Card(Rank.THREE, 2),
+        Card(Rank.THREE, 3),
+        Card(Rank.FOUR, 0)
     ]
-    game.hands[1] = [Card(Rank.FIVE, Suit.DIAMOND)]
-    game.hands[2] = [Card(Rank.SIX, Suit.DIAMOND)]
+    game.hands[1] = [Card(Rank.FIVE, 0)]
+    game.hands[2] = [Card(Rank.SIX, 0)]
 
     game.current_player = 0
     game.last_play = None

@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple, Optional
 import pickle
 import os
 
-from src.core.card import Card, Rank, Suit
+from src.core.card import Card, Rank
 from src.core.hand_type import HandType, Play
 from src.core.action_generator import ActionGenerator
 
@@ -56,20 +56,19 @@ class ActionSpace:
         self._add_action_abstract(self.pass_action.type, self.pass_action.length, self.pass_action.max_rank)
         idx += 1
         
-        # 构造全牌堆 (45张)
+        # 构造全牌堆 (45张，去花色)
         full_deck_cards = []
         # 3-Q (4张)
         for r in range(3, 13):
-            for s in Suit:
-                full_deck_cards.append(Card(Rank(r), s))
+            for i in range(4):
+                full_deck_cards.append(Card(Rank(r), i))
         # K (3张)
-        full_deck_cards.append(Card(Rank.KING, Suit.CLUB))
-        full_deck_cards.append(Card(Rank.KING, Suit.HEART))
-        full_deck_cards.append(Card(Rank.KING, Suit.SPADE))
+        for i in range(3):
+            full_deck_cards.append(Card(Rank.KING, i))
         # A (1张)
-        full_deck_cards.append(Card(Rank.ACE, Suit.SPADE))
+        full_deck_cards.append(Card(Rank.ACE, 0))
         # 2 (1张)
-        full_deck_cards.append(Card(Rank.TWO, Suit.HEART))
+        full_deck_cards.append(Card(Rank.TWO, 0))
         
         print("Generating all actions from full deck...")
         # ActionGenerator.get_all_actions 会生成基于当前手牌的所有组合。

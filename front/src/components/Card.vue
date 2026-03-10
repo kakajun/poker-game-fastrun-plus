@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Suit, Rank } from '../types';
+import { Rank } from '../types';
 import type { Card } from '../types';
 import { cn } from '../lib/utils';
 
@@ -72,7 +72,7 @@ const handleClick = () => {
     <img
       v-if="!isHidden"
       :src="imageSrc"
-      :alt="`${card.suit}${card.rank}`"
+      :alt="`Card ${card.rank}`"
       class="w-full h-full object-contain drop-shadow-md"
       draggable="false"
     />

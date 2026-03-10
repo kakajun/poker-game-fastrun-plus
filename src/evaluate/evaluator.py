@@ -43,13 +43,21 @@ class ModelEvaluator:
 
         env = SingleAgentWrapper(base_env, opponents=opponents)
 
-        # 2. 加载模型
+        # 2. 加载模型并检查维度
         try:
-            # 使用 custom_objects 忽略版本不匹配导致的警告（可选）
-            model = MaskablePPO.load(model_path, env=env)
+            model = MaskablePPO.load(model_path)
+            model_obs_shape = model.observation_space.shape
+            env_obs_shape = env.observation_space.shape
+
+            if model_obs_shape != env_obs_shape:
+                print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
+                return None
+            
+            # 重新关联环境以便后续评估 (如果需要)
+            model.set_env(env)
         except Exception as e:
             print(f"无法加载模型 {model_path}: {e}")
-            return
+            return None
 
         # 3. 运行评估循环
         stats = {

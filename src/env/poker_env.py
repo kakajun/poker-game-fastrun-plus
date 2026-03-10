@@ -11,9 +11,9 @@ from src.env.obs_encoder import ObsEncoder
 
 class PokerEnv(gym.Env):
     """
-    跑得快强化学习环境
-    Obs: [MyHand(52), OthersCount(2), LastPlay(62), PlayedHistory(52)] -> 168维
-    Action: Discrete(200+) (Type-Len-MaxRank)
+    跑得快强化学习环境 (去花色精简版)
+    Obs: [MyHand(15), OthersCount(2), LastPlayRanks(15), LastPlayType(10)] -> 42维
+    Action: Discrete(252) (Type-Len-MaxRank)
     Reward: Win=+100, Lose=-Remain, Bomb=+20
     """
     

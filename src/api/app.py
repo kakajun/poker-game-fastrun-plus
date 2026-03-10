@@ -12,7 +12,7 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from src.core.game import Game
-from src.core.card import Card, Rank, Suit
+from src.core.card import Card, Rank
 from src.core.hand_type import HandType, Play
 from src.core.evaluator import HandEvaluator
 from src.api.session_manager import SessionManager
@@ -35,7 +35,7 @@ session_manager = SessionManager()
 ai_service = AIService()
 
 def _convert_card_to_model(card: Card) -> CardModel:
-    return CardModel(rank=card.rank.value, suit=card.suit.value, id=card.id)
+    return CardModel(rank=card.rank.value, id=card.id)
 
 def _convert_play_to_model(play: Play) -> PlayModel:
     return PlayModel(

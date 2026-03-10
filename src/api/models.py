@@ -3,7 +3,6 @@ from typing import List, Optional, Any
 
 class CardModel(BaseModel):
     rank: int
-    suit: int
     id: int # 0-51
 
 class PlayModel(BaseModel):

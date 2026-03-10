@@ -12,11 +12,11 @@ from src.env.single_agent_wrapper import SingleAgentWrapper
 from src.agent.random_agent import RandomAgent
 from src.agent.heuristic_agent import HeuristicAgent
 from src.core.hand_type import HandType
-from src.core.card import Card, Rank, Suit
+from src.core.card import Card, Rank
 
 class SpringChallengeEvaluator:
     """
-    专门针对“打春天”能力的模型评估工具。
+    专门针对“打春天”能力的模型评估工具 (去花色版)。
     1. 移除无意义的顶大违规率。
     2. 增加预设的“必打春天”手牌测试。
     3. 统计模型在好牌情况下的春天达成率。
@@ -29,29 +29,28 @@ class SpringChallengeEvaluator:
     def _create_spring_hand(self) -> List[Card]:
         """
         构造一组极其强力、理论上必打春天的手牌。
-        例如：红桃3开始的长顺子 + 大对子 + 炸弹。
+        例如：点数 3 开始的长顺子 + 大对子 + 炸弹。
         """
-        # 必须包含红桃3 (用于首出)
-        hand = [Card(Rank.THREE, Suit.HEART)]
-        # 顺子 4-5-6-7-8
-        for r in range(4, 9):
-            hand.append(Card(Rank(r), Suit.SPADE))
-        # 连对 99-1010-JJ
-        for r in range(9, 12):
-            hand.append(Card(Rank(r), Suit.SPADE))
-            hand.append(Card(Rank(r), Suit.HEART))
+        hand = []
+        # 顺子 3-4-5-6-7
+        for r in range(3, 8):
+            hand.append(Card(Rank(r)))
+        # 连对 88-99-1010
+        for r in range(8, 11):
+            hand.append(Card(Rank(r)))
+            hand.append(Card(Rank(r)))
         # 炸弹 QQQQ
-        for s in Suit:
-            hand.append(Card(Rank.QUEEN, s))
+        for _ in range(4):
+            hand.append(Card(Rank.QUEEN))
         # 大单张 2
-        hand.append(Card(Rank.TWO, Suit.HEART))
+        hand.append(Card(Rank.TWO))
         
         # 确保正好15张
         while len(hand) < 15:
             # 补点大牌
-            hand.append(Card(Rank.ACE, Suit.SPADE))
+            hand.append(Card(Rank.ACE))
             
-        return sorted(hand, key=lambda c: (c.rank.value, -c.suit.value), reverse=True)
+        return sorted(hand, reverse=True)
 
     def evaluate_model(self, model_path: str, model_name: str, opponent_type: str = "heuristic"):
         """
@@ -67,11 +66,20 @@ class SpringChallengeEvaluator:
             
         env = SingleAgentWrapper(base_env, opponents=opponents)
         
+        # 2. 加载模型并检查维度
         try:
-            model = MaskablePPO.load(model_path, env=env)
+            model = MaskablePPO.load(model_path)
+            model_obs_shape = model.observation_space.shape
+            env_obs_shape = env.observation_space.shape
+
+            if model_obs_shape != env_obs_shape:
+                print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
+                return None
+            
+            model.set_env(env)
         except Exception as e:
             print(f"无法加载模型 {model_path}: {e}")
-            return
+            return None
 
         stats = {
             "wins": 0,

@@ -1,5 +1,6 @@
+import random
 from typing import List, Dict, Optional, Tuple
-from src.core.card import Card, Rank, Suit
+from src.core.card import Card, Rank
 from src.core.deck import Deck
 from src.core.hand_type import HandType, Play
 from src.core.action_generator import ActionGenerator
@@ -32,33 +33,16 @@ class Game:
         self.start_game()
 
     def start_game(self):
-        """开始新游戏：洗牌、发牌、确定首出"""
+        """开始新游戏：洗牌、发牌、确定首出 (随机)"""
         self.deck.shuffle()
-        h1, h2, h3 = self.deck.deal()
+        self.hands = self.deck.deal()
 
-        # 排序手牌：按点数降序，同点数按花色 (黑>红>梅>方)
-        # Rank.value: 2=15 > ... > 3=3
-        # Suit.value: Spade=0, Heart=1, Club=2, Diamond=3
-        # key: (rank, -suit) -> Rank大在前，Suit小在前
-        def sort_key(c): return (c.rank.value, -c.suit.value)
+        # 排序手牌：仅按点数降序
+        for hand in self.hands:
+            hand.sort(reverse=True)
 
-        h1.sort(key=sort_key, reverse=True)
-        h2.sort(key=sort_key, reverse=True)
-        h3.sort(key=sort_key, reverse=True)
-
-        self.hands = [h1, h2, h3]
-
-        # 寻找红桃3
-        h3_card = Card(Rank.THREE, Suit.HEART)
-        start_idx = -1
-        for i in range(3):
-            if h3_card in self.hands[i]:
-                start_idx = i
-                break
-
-        if start_idx == -1:
-            # 理论上不可能，除非牌堆不对
-            raise ValueError("No Heart 3 found in hands!")
+        # 随机选择首出玩家
+        start_idx = random.randint(0, 2)
 
         self.current_player = start_idx
         self.last_play = None
@@ -93,20 +77,6 @@ class Game:
             actions = ActionGenerator.get_legal_actions(hand, target)
             if not actions:
                 return [Play(HandType.PASS, [], length=0, max_rank=0)]
-
-        # 特殊规则过滤
-        # 1. 首出必须包含红桃3 (如果是首轮且还没出过牌)
-        h3_card = Card(Rank.THREE, Suit.HEART)
-        # 判断是否是首轮：所有玩家出牌次数均为0?
-        # 或者简单的：如果持有红桃3，且当前是自由出牌，且还没有打出过?
-        # 其实只要持有红桃3，这一手必须出红桃3 (因为红桃3必首出)
-        # 只有持有者才受限。
-        if h3_card in hand:
-            filtered = []
-            for a in actions:
-                if h3_card in a.cards:
-                    filtered.append(a)
-            actions = filtered
 
         # 3. 顶大规则 (报单时上家出最大单)
         # 检查下家 (next player) 手牌数
