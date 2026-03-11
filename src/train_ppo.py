@@ -19,6 +19,7 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.utils import get_action_masks
 from sb3_contrib.common.wrappers import ActionMasker
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, DummyVecEnv
 
 from src.env.poker_env import PokerEnv
 from src.env.single_agent_wrapper import SingleAgentWrapper
@@ -26,6 +27,25 @@ from src.env.single_agent_wrapper import SingleAgentWrapper
 def mask_fn(env: gym.Env) -> np.ndarray:
     """获取环境的动作掩码"""
     return env.action_masks()
+
+def make_env(seed: int = 0, rank: int = 0, log_dir: str = None):
+    """
+    环境创建辅助函数，用于并行训练。
+    """
+    def _init():
+        # 1. 基础环境
+        env = PokerEnv()
+        # 2. 启用混合对手模式 (Self-Play)
+        # 为每个并行环境设置不同的 seed 增加多样性
+        env = SingleAgentWrapper(env, mixed_opponents=True, self_play_prob=0.3)
+        # 3. 添加动作掩码 Wrapper
+        env = ActionMasker(env, mask_fn)
+        # 4. 监控器
+        if log_dir:
+            monitor_path = os.path.join(log_dir, f"monitor_{rank}")
+            env = Monitor(env, monitor_path)
+        return env
+    return _init
 
 def plot_training_curves(log_dir: str, out_dir: str):
     """绘制训练曲线（奖励和回合长度）并保存为图片"""
@@ -125,36 +145,47 @@ def train():
     os.makedirs(run_dir, exist_ok=True)
     os.makedirs("models", exist_ok=True)
 
-    # 2. 创建环境
-    env = PokerEnv()
-    # 启用混合对手模式，包括 30% 概率的 Self-Play
-    env = SingleAgentWrapper(env, mixed_opponents=True, self_play_prob=0.3)
+    # 2. 创建并行环境 (CPU 核心数优化)
+    # 您的 CPU 是 8 核 16 线程，建议使用 12 个并行环境，留一些资源给系统
+    n_envs = 12
+    print(f"正在启动 {n_envs} 个并行环境进行加速训练...")
 
-    # 3. 添加动作掩码和监控器 Wrapper
-    env = ActionMasker(env, mask_fn)
-    env = Monitor(env, run_dir)
+    # 使用 SubprocVecEnv 实现真正的并行 (多进程)
+    # 注意: Windows 下必须使用 if __name__ == '__main__' 保护 (已在入口处添加)
+    env = SubprocVecEnv([make_env(seed=i, rank=i, log_dir=run_dir) for i in range(n_envs)])
+
+    # VecMonitor 用于监控 VecEnv 的总体统计
+    env = VecMonitor(env, run_dir)
 
     # 4. 创建 PPO 模型
+    # 注意: batch_size 是每次更新时使用的样本数。
+    # n_steps 是每个环境在一次更新前采样的步数。
+    # 总 buffer 大小 = n_steps * n_envs
+    # 建议: 保持 batch_size 较大，n_steps 适中
     model = MaskablePPO(
         "MlpPolicy",
         env,
         verbose=1,
         tensorboard_log=run_dir,
-        learning_rate=2e-4,
-        n_steps=4096,
-        batch_size=128,
+        learning_rate=3e-4, # 略微提高学习率，因为 batch size 变大了
+        n_steps=2048 // n_envs, # 保持总 buffer 大小类似 (或者直接用 512)
+        batch_size=256,
         gamma=0.99,
         gae_lambda=0.95,
-        ent_coef=0.05,
-        policy_kwargs=dict(net_arch=[256, 256, 256])
+        ent_coef=0.01,
+        policy_kwargs=dict(net_arch=[512, 512, 256]) # 加深网络以处理更复杂的策略
     )
 
-    # 5. 设置 Callback (每 50,000 步保存一次快照用于 Self-Play)
-    snapshot_callback = SelfPlaySaveCallback(check_freq=50000, save_path="models")
+    # 5. 设置 Callback (每 100,000 步保存一次快照)
+    # 注意: check_freq 是基于 n_envs 的调用次数。
+    # 实际步数 = check_freq * n_envs
+    save_freq = 100000 // n_envs
+    snapshot_callback = SelfPlaySaveCallback(check_freq=save_freq, save_path="models")
 
     # 6. 开始训练
-    total_timesteps = 500000
-    print(f"开始 Self-Play 训练，总步数: {total_timesteps}...")
+    # 由于并行加速，我们可以训练更多步数
+    total_timesteps = 1000000
+    print(f"开始并行 Self-Play 训练，总步数: {total_timesteps}...")
 
     model.learn(
         total_timesteps=total_timesteps,
@@ -171,8 +202,21 @@ def train():
     # 7. 评估并可视化
     print("\n开始生成训练和评估结果图...")
     plot_training_curves(run_dir, run_dir)
-    win_rate, avg_reward = evaluate(model, env)
+
+    # 创建一个单独的评估环境
+    print("创建评估环境...")
+    eval_env = PokerEnv()
+    eval_env = SingleAgentWrapper(eval_env, mixed_opponents=False) # 评估时通常对抗纯随机或纯启发式，这里默认随机
+    eval_env = ActionMasker(eval_env, mask_fn)
+    # 包装为 DummyVecEnv 以匹配 SB3 接口（虽然 predict 可以处理非 VecEnv，但保持一致更好）
+    # eval_env = DummyVecEnv([lambda: eval_env])
+    # 不，MaskablePPO 的 predict 可以直接接受 gym.Env，只要它有 action_masks
+
+    win_rate, avg_reward = evaluate(model, eval_env)
     save_eval_image(win_rate, avg_reward, run_dir, 100)
+
+    # 关闭训练环境
+    env.close()
 
 def evaluate(model, env, n_episodes=100):
     """评估模型性能"""
@@ -192,6 +236,8 @@ def evaluate(model, env, n_episodes=100):
 
             # 模型预测
             action, _states = model.predict(obs, action_masks=action_masks, deterministic=True)
+            if isinstance(action, np.ndarray):
+                action = action.item()
 
             # 执行动作
             obs, reward, terminated, truncated, info = env.step(action)
