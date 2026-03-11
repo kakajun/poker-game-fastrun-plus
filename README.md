@@ -82,7 +82,7 @@ npm install
 # 启动开发服务器
 npm run dev
 ```
-
+1
 浏览器访问: `http://localhost:5173` (或终端显示的端口)
 
 ### 4. 训练 AI (可选)
