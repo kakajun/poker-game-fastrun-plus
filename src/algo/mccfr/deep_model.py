@@ -5,17 +5,13 @@ import numpy as np
 from typing import List, Optional
 
 class DeepRegretNet(nn.Module):
-    """
-    深度遗憾网络 (Deep Regret Network)
-    输入: 状态编码 (42 dim)
-    输出: 每个动作的预测遗憾值 (ActionSpace.size dim)
-    """
     def __init__(self, state_dim: int, action_dim: int):
         super(DeepRegretNet, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 256)
-        self.head = nn.Linear(256, action_dim)
+        # 大幅提升网络宽度，从 256 增加到 1024，充分利用 GPU
+        self.fc1 = nn.Linear(state_dim, 1024)
+        self.fc2 = nn.Linear(1024, 1024)
+        self.fc3 = nn.Linear(1024, 512)
+        self.head = nn.Linear(512, action_dim)
         
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -24,17 +20,12 @@ class DeepRegretNet(nn.Module):
         return self.head(x)
 
 class DeepStrategyNet(nn.Module):
-    """
-    深度策略网络 (Deep Strategy Network)
-    输入: 状态编码 (42 dim)
-    输出: 平均策略概率分布 (ActionSpace.size dim)
-    """
     def __init__(self, state_dim: int, action_dim: int):
         super(DeepStrategyNet, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 256)
-        self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, 256)
-        self.head = nn.Linear(256, action_dim)
+        self.fc1 = nn.Linear(state_dim, 1024)
+        self.fc2 = nn.Linear(1024, 1024)
+        self.fc3 = nn.Linear(1024, 512)
+        self.head = nn.Linear(512, action_dim)
         
     def forward(self, x):
         x = F.relu(self.fc1(x))

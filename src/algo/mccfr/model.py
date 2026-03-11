@@ -95,7 +95,9 @@ class DeepMCCFRModel:
         self.action_space = ActionSpace()
         self.encoder = ObsEncoder()
         # 默认使用 CPU 进行推理，防止后端服务占用过多 GPU 显存
-        self.wrapper = ModelWrapper(42, self.action_space.size, device="cpu")
+        # 显式使用新的维度 57
+        state_dim = self.encoder.shape[0]
+        self.wrapper = ModelWrapper(state_dim, self.action_space.size, device="cpu")
         self.load(model_path)
 
     def load(self, path: str):
@@ -112,6 +114,7 @@ class DeepMCCFRModel:
     def get_action(self, game: Game, deterministic: bool = True) -> Play:
         """
         根据当前局面预测最佳动作。
+        优先使用 Strategy Net (平均策略)，如果效果不好可切换回 Regret Net。
         """
         legal_plays = game.get_legal_actions()
         if not legal_plays:
@@ -120,10 +123,10 @@ class DeepMCCFRModel:
             return legal_plays[0]
 
         obs = self.encoder.encode(game, game.current_player)
-
-        # 预测遗憾值并转换为策略 (Regret Matching)
-        regrets = self.wrapper.predict_regrets(obs)
-
+        
+        # 方案 A: 使用 Strategy Net 直接预测概率 (纳什均衡平均策略)
+        probs_all = self.wrapper.predict_strategy(obs)
+        
         # 获取合法动作 ID
         legal_ids = []
         id_to_play = {}
@@ -132,20 +135,21 @@ class DeepMCCFRModel:
             if aid != -1:
                 legal_ids.append(aid)
                 id_to_play[aid] = p
-
+        
         if not legal_ids:
             return legal_plays[0]
 
-        # 过滤后悔值并匹配策略
-        pos_regrets = np.maximum(regrets[legal_ids], 0)
-        if np.sum(pos_regrets) > 0:
-            probs = pos_regrets / np.sum(pos_regrets)
+        # 重新归一化合法动作的概率
+        probs_legal = probs_all[legal_ids]
+        if np.sum(probs_legal) > 0:
+            probs_legal /= np.sum(probs_legal)
         else:
-            probs = np.ones(len(legal_ids)) / len(legal_ids)
+            # 如果策略网络没学到合法动作，回退到 Regret Matching 或随机
+            probs_legal = np.ones(len(legal_ids)) / len(legal_ids)
 
         if deterministic:
-            chosen_id = legal_ids[np.argmax(probs)]
+            chosen_id = legal_ids[np.argmax(probs_legal)]
         else:
-            chosen_id = np.random.choice(legal_ids, p=probs)
-
+            chosen_id = np.random.choice(legal_ids, p=probs_legal)
+            
         return id_to_play[chosen_id]

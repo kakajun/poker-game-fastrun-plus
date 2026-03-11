@@ -16,7 +16,8 @@ class ObsEncoder:
     """
     
     def __init__(self):
-        self.shape = (42,)
+        # 15(手牌) + 2(对手张数) + 15(上家出牌) + 10(牌型) + 15(已出牌统计) = 57
+        self.shape = (57,)
 
     def encode(self, game: Game, player_idx: int) -> np.ndarray:
         """
@@ -55,11 +56,19 @@ class ObsEncoder:
             if 0 <= type_idx < 10:
                 last_play_type[type_idx] = 1.0
         
-        # Concatenate: 15 + 2 + 15 + 10 = 42
+        # 4. 已出牌统计 (15维) - 极其重要，AI 必须知道哪些大牌已经出了
+        played_cards_vec = np.zeros(15, dtype=np.float32)
+        for card_id in game.played_card_ids:
+            # 还原出 rank (Card.from_id 的逻辑)
+            rank_val = (card_id // 4) + 3
+            played_cards_vec[rank_val - 3] += 0.25 # 归一化，每张占 0.25
+            
+        # Concatenate: 15 + 2 + 15 + 10 + 15 = 57
         return np.concatenate([
             my_hand,
             others_vec,
             last_play_ranks,
-            last_play_type
+            last_play_type,
+            played_cards_vec
         ])
 

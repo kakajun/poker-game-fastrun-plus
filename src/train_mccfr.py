@@ -48,56 +48,36 @@ def main():
     # 初始化训练器
     trainer = DeepCFRTrainer(num_workers=num_workers)
 
-    # 训练配置 (针对 16G 显存优化)
-    # 加大 Batch Size 以利用显存
-    TOTAL_ITERATIONS = 10000
-    # 增加单次采样量，减少进程切换开销
-    GAMES_PER_WORKER = 50
-    # 16G 显存，batch_size 可以非常大，比如 4096 甚至 8192
-    BATCH_SIZE = 4096
+    # 训练配置 (针对 16G 显存极限优化)
+    TOTAL_ITERATIONS = 50000  # 异步模式下迭代定义改变
+    BATCH_SIZE = 16384       # 16G 显存可以开到 1.6万甚至 3.2万
+    TRAIN_UPDATES = 200      # 每次训练循环更新 200 次，让 GPU 满载
     SAVE_INTERVAL = 100
 
-    print(f"开始训练...")
-    print(f"Batch Size: {BATCH_SIZE} | Games/Worker: {GAMES_PER_WORKER}")
+    print(f"开始异步训练...")
+    print(f"Batch Size: {BATCH_SIZE} | Updates/Loop: {TRAIN_UPDATES}")
 
+    trainer.start_workers()
     start_time = time.time()
-    total_games_processed = 0
 
     try:
         for i in range(1, TOTAL_ITERATIONS + 1):
-            # 执行一步训练
-            # 修改 train_step 逻辑以支持自定义 batch_size (需要修改 deep_trainer.py)
-            # 目前 deep_trainer.py 默认 batch_size 较小，我们稍后通过工具修改它
-            # 或者我们在 trainer 内部自动处理
-
-            # 这里我们假设 train_step 已经优化
-            # 实际上 deep_trainer.py 的 buffer size 是 100000，sample size 是 128
-            # 我们可以在外部循环中多次 update network 来利用数据
-
-            # 1. 采样
-            new_samples = trainer.train_step(games_per_worker=GAMES_PER_WORKER)
-            # 估算局数 (平均每局42步?) 不准，直接用 worker * games
-            total_games_processed += new_samples // 42
-
-            # 2. 强化训练 (Replay Buffer 利用)
-            # 既然显存大，我们可以多更新几次网络
-            if len(trainer.regret_buffer) > BATCH_SIZE:
-                # 显存足够，进行多次大 Batch 更新
-                # 这里我们更新 10 次，充分利用每次采集的样本
-                trainer.update_network(batch_size=BATCH_SIZE, updates=10)
+            # 执行一步异步训练 (收集当前队列数据并更新)
+            new_data = trainer.collect_and_update(
+                batch_size=BATCH_SIZE, train_updates=TRAIN_UPDATES)
 
             if i % 10 == 0:
                 elapsed = time.time() - start_time
-                # 真实 FPS 计算
-                current_fps = (i * GAMES_PER_WORKER * num_workers) / elapsed
-                print(f"Iter: {i}/{TOTAL_ITERATIONS} | Buffer: {len(trainer.regret_buffer)} | "
-                      f"FPS: {current_fps:.1f} games/s | Time: {elapsed:.1f}s")
+                # 统计每秒处理的数据条数
+                print(f"Loop: {i} | Buffer: {len(trainer.regret_buffer)} | "
+                      f"NewData: {new_data} | Time: {elapsed:.1f}s")
 
             if i % SAVE_INTERVAL == 0:
                 trainer.save_model(MODEL_PATH)
 
     except KeyboardInterrupt:
         print("\n训练被手动中断，正在保存当前进度...")
+        trainer.stop_workers()
         trainer.save_model(MODEL_PATH)
 
     print(f"训练结束。最终模型保存在: {MODEL_PATH}")
