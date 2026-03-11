@@ -25,9 +25,13 @@ class Play:
     """出牌动作描述"""
     type: HandType
     cards: List['Card']
-    length: int = 0      # 顺子/连对/飞机的长度 (如顺子5张length=5, 连对3对length=3)
-    max_rank: int = 0    # 比较大小的关键点数 (如顺子最大牌, 三带一的三张点数)
+    length: int = 0      # For straights, sequences, airplanes (e.g., 5-card straight has length 5)
+    max_rank: int = 0    # The primary rank for comparison (e.g., rank of the triple in a trio)
+    kicker_rank: int = 0 # Rank of the kicker card(s) (e.g., the single in a TRIPLE_WITH_SINGLE)
     is_bomb: bool = False
 
     def __repr__(self):
-        return f"Play({self.type.name}, {self.cards}, len={self.length}, max={self.max_rank})"
+        if self.kicker_rank > 0:
+            return f"Play({self.type.name}, {self.cards}, len={self.length}, max={self.max_rank}, kicker={self.kicker_rank})"
+        else:
+            return f"Play({self.type.name}, {self.cards}, len={self.length}, max={self.max_rank})"

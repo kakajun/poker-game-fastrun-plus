@@ -248,8 +248,8 @@ if __name__ == "__main__":
             print("错误: 找不到任何基准模型 (.zip)")
             sys.exit(1)
 
-    # 2. 筛选待测评模型 (所有 .pth 和 .pkl)
-    test_models = [f for f in all_files if (f.endswith(
+    # 2. 筛选待测评模型 (所有 .zip, .pth 和 .pkl)
+    test_models = [f for f in all_files if (f.endswith(".zip") or f.endswith(
         ".pth") or f.endswith(".pkl")) and f != benchmark_file]
 
     print(f"=== 开始模型对弈测评 ===")
@@ -260,14 +260,14 @@ if __name__ == "__main__":
         m_path = os.path.join(model_dir, m)
         evaluator.evaluate_model(m_path, m, benchmark_path)
 
-    # 3. 如果有多个 .pth 模型，也可以进行它们之间的内战
-    pths = [f for f in test_models if f.endswith(".pth")]
-    if len(pths) >= 2:
-        print("\n--- 进行 MCCFR 模型内战 ---")
-        # 让最新的对战次新的
-        pths.sort(key=lambda x: os.path.getmtime(
+    # 3. 如果有多个 .pth 或 .zip 模型，也可以进行它们之间的内战
+    newest_models = [f for f in all_files if f.endswith(".zip") or f.endswith(".pth")]
+    if len(newest_models) >= 2:
+        print("\n--- 进行最新模型之间的内战 ---")
+        # 按修改时间排序
+        newest_models.sort(key=lambda x: os.path.getmtime(
             os.path.join(model_dir, x)), reverse=True)
         evaluator.evaluate_model(os.path.join(
-            model_dir, pths[0]), f"{pths[0]} (最新)", os.path.join(model_dir, pths[1]))
+            model_dir, newest_models[0]), f"{newest_models[0]} (最新)", os.path.join(model_dir, newest_models[1]))
 
     evaluator.save_report("src/evaluate/reports")

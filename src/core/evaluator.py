@@ -123,19 +123,16 @@ class HandEvaluator:
         for c in cards:
             rank_counts[c.rank] = rank_counts.get(c.rank, 0) + 1
 
+        # 必须是两组牌 (例如 333, 4)
         if len(rank_counts) != 2:
             return None
 
-        triple_rank = None
-        single_rank = None
-        for r, count in rank_counts.items():
-            if count == 3:
-                triple_rank = r
-            elif count == 1:
-                single_rank = r
+        # 必须是三张和单张的组合
+        if 3 in rank_counts.values() and 1 in rank_counts.values():
+            triple_rank = [r for r, c in rank_counts.items() if c == 3][0]
+            single_rank = [r for r, c in rank_counts.items() if c == 1][0]
+            return Play(HandType.TRIPLE_WITH_SINGLE, cards, length=1, max_rank=triple_rank, kicker_rank=single_rank)
 
-        if triple_rank and single_rank:
-            return Play(HandType.TRIPLE_WITH_SINGLE, cards, length=1, max_rank=triple_rank)
         return None
 
     @staticmethod
