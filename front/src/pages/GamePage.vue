@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { useGameStore } from '../store/game';
 import Hand from '../components/Hand.vue';
 import Card from '../components/Card.vue';
 import type { Card as CardType } from '../types';
 import { canBeat, analyzeHand, HandType } from '../lib/rules';
 
+const route = useRoute();
 const gameStore = useGameStore();
 
 onMounted(() => {
-  gameStore.initGame();
+  const modelName = route.query.model as string | undefined;
+  gameStore.initGame(modelName);
 });
 
 const handlePlay = (cards: CardType[]) => {

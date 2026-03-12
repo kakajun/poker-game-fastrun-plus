@@ -17,7 +17,7 @@ from src.core.hand_type import HandType, Play
 from src.core.evaluator import HandEvaluator
 from src.api.session_manager import SessionManager
 from src.api.ai_service import AIService
-from src.api.models import GameStateModel, ActionRequest, CardModel, PlayModel
+from src.api.models import GameStateModel, ActionRequest, CardModel, PlayModel, GameStartRequest
 
 app = FastAPI(title="Poker Game API")
 
@@ -49,13 +49,13 @@ def _convert_game_to_state(game: Game, game_id: str) -> GameStateModel:
     hands = []
     for h in game.hands:
         hands.append([_convert_card_to_model(c) for c in h])
-        
+
     last_play = _convert_play_to_model(game.last_play) if game.last_play else None
-    
+
     # Get legal actions for current player
     legal_plays = game.get_legal_actions()
     legal_models = [_convert_play_to_model(p) for p in legal_plays]
-    
+
     return GameStateModel(
         game_id=game_id,
         current_player=game.current_player,
@@ -70,8 +70,17 @@ def _convert_game_to_state(game: Game, game_id: str) -> GameStateModel:
         legal_actions=legal_models
     )
 
+@app.get("/models", response_model=List[str])
+def list_models():
+    """获取可用模型列表"""
+    return ai_service.list_models()
+
 @app.post("/game/start", response_model=GameStateModel)
-def start_game():
+def start_game(request: GameStartRequest = None):
+    # 如果指定了模型，加载它
+    if request and request.model_name:
+        ai_service.load_model(request.model_name)
+
     session_id = session_manager.create_session()
     session = session_manager.get_session(session_id)
     return _convert_game_to_state(session.game, session_id)
@@ -88,18 +97,18 @@ def player_action(game_id: str, request: ActionRequest):
     session = session_manager.get_session(game_id)
     if not session:
         raise HTTPException(status_code=404, detail="Game not found")
-        
+
     game = session.game
     if game.is_over:
         raise HTTPException(status_code=400, detail="Game is over")
-        
+
     # Check if it's human turn (assuming human is 0)
     # But for debugging, we allow action on any turn?
     # Better to enforce turn.
     if game.current_player != session.human_player_idx:
         # raise HTTPException(status_code=400, detail="Not your turn")
         pass # Allow for now
-        
+
     # Parse action
     if not request.card_ids:
         # Pass
@@ -112,32 +121,32 @@ def player_action(game_id: str, request: ActionRequest):
                 cards.append(Card.from_id(cid))
         except:
             raise HTTPException(status_code=400, detail="Invalid card IDs")
-            
+
         # Evaluate Hand
         play = HandEvaluator.evaluate(cards)
         if not play:
             raise HTTPException(status_code=400, detail="Invalid hand type")
-            
+
     # Check legality (using game engine logic)
     # We can check if `play` is in `get_legal_actions()`
     # But `get_legal_actions` returns all possible actions, which is expensive to search.
     # Better to check `can_beat` directly.
-    # However, `game.step` does not check `can_beat` strictly? 
+    # However, `game.step` does not check `can_beat` strictly?
     # `game.step` calls `game.get_legal_actions`? No.
     # `game.step` assumes action is legal.
-    
+
     # So we must validate here.
     # 1. Check if cards are in hand (Game.step checks this)
     # 2. Check if can beat last play
-    
+
     # But pass logic is tricky (must beat if possible).
     # Let's rely on `game.get_legal_actions()` for strict rule enforcement (including pass rule).
     # To optimize, we generate all legal actions and check if our play is in it.
     # Since we implemented `__eq__` for Play? No.
     # We need to match type, length, max_rank.
-    
+
     legal_actions = game.get_legal_actions()
-    
+
     is_legal = False
     for legal in legal_actions:
         if play.type == legal.type and play.length == legal.length and play.max_rank == legal.max_rank:
@@ -150,9 +159,9 @@ def player_action(game_id: str, request: ActionRequest):
             if set(c.id for c in play.cards) == set(c.id for c in legal.cards):
                 is_legal = True
                 # Use the legal play object (it might have extra info like is_bomb)
-                play = legal 
+                play = legal
                 break
-                
+
     if not is_legal:
         # Special case: Pass
         if play.type == HandType.PASS:
@@ -165,7 +174,7 @@ def player_action(game_id: str, request: ActionRequest):
         game.step(play)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-        
+
     return _convert_game_to_state(game, game_id)
 
 @app.post("/game/{game_id}/ai", response_model=GameStateModel)
@@ -173,14 +182,14 @@ def trigger_ai(game_id: str):
     session = session_manager.get_session(game_id)
     if not session:
         raise HTTPException(status_code=404, detail="Game not found")
-        
+
     game = session.game
     if game.is_over:
         return _convert_game_to_state(game, game_id)
-        
+
     # Predict (Even for human if auto-play is requested)
     action = ai_service.predict(game, game.current_player)
-    
+
     if action:
         game.step(action)
     else:
@@ -191,7 +200,7 @@ def trigger_ai(game_id: str):
             game.step(pass_action)
         except:
             raise HTTPException(status_code=500, detail="AI failed to act")
-            
+
     return _convert_game_to_state(game, game_id)
 
 if __name__ == "__main__":

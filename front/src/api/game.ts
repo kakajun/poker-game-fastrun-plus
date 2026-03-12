@@ -30,8 +30,15 @@ export interface GameStateModel {
 }
 
 export const gameApi = {
-  async startGame(): Promise<GameStateModel> {
-    const response = await axios.post(`${API_BASE_URL}/game/start`);
+  async getModels(): Promise<string[]> {
+    const response = await axios.get(`${API_BASE_URL}/models`);
+    return response.data;
+  },
+
+  async startGame(modelName?: string): Promise<GameStateModel> {
+    const response = await axios.post(`${API_BASE_URL}/game/start`, {
+      model_name: modelName
+    });
     return response.data;
   },
 

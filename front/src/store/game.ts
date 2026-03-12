@@ -32,9 +32,9 @@ export const useGameStore = defineStore('game', {
   },
 
   actions: {
-    async initGame() {
+    async initGame(modelName?: string) {
       try {
-        const state = await gameApi.startGame();
+        const state = await gameApi.startGame(modelName);
         this.gameId = state.game_id;
         this.syncState(state);
 

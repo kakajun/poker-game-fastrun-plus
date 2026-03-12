@@ -17,7 +17,7 @@ class AIService:
     支持 MaskablePPO (SB3) 和 DeepMCCFR 模型。
     """
 
-    def __init__(self, model_path: str = "models/deep_mccfr_gpu.pth"):
+    def __init__(self, model_path: str = None):
         self.model_path = model_path
         self.ppo_model: Optional[MaskablePPO] = None
         self.mccfr_model: Optional[DeepMCCFRModel] = None
@@ -25,56 +25,71 @@ class AIService:
         self.obs_encoder = ObsEncoder()
         self.heuristic_agent = HeuristicAgent()
 
-        # Load model on init
-        self._load_model()
+        # Load model on init if path provided, otherwise auto-search
+        if model_path:
+            self.load_model(model_path)
+        else:
+            self._load_auto()
 
-    def _load_model(self):
-        # 1. 尝试加载 Deep MCCFR 模型 (.pth)
-        if self.model_path.endswith(".pth") and os.path.exists(self.model_path):
+    def list_models(self) -> List[str]:
+        """列出 models/ 目录下的所有可用模型"""
+        model_dir = "models"
+        if not os.path.exists(model_dir):
+            return []
+        files = os.listdir(model_dir)
+        valid_extensions = ('.zip', '.pth', '.pkl')
+        models = [f for f in files if f.endswith(valid_extensions)]
+        # 按修改时间排序，最新的在前
+        models.sort(key=lambda x: os.path.getmtime(os.path.join(model_dir, x)), reverse=True)
+        return models
+
+    def load_model(self, model_name: str) -> bool:
+        """加载指定模型"""
+        model_dir = "models"
+        # 处理全路径或文件名
+        if os.path.dirname(model_name):
+            full_path = model_name
+        else:
+            full_path = os.path.join(model_dir, model_name)
+
+        if not os.path.exists(full_path):
+            print(f"Model file not found: {full_path}")
+            return False
+
+        print(f"Loading model: {full_path}...")
+        self.ppo_model = None
+        self.mccfr_model = None
+
+        # 1. Deep MCCFR (.pth)
+        if full_path.endswith(".pth"):
             try:
-                self.mccfr_model = DeepMCCFRModel(self.model_path)
-                print(
-                    f"Successfully loaded Deep MCCFR model from {self.model_path}")
-                return
+                self.mccfr_model = DeepMCCFRModel(full_path)
+                print(f"Successfully loaded Deep MCCFR model: {model_name}")
+                return True
             except Exception as e:
                 print(f"Failed to load Deep MCCFR model: {e}")
+                return False
 
-        # 2. 尝试加载 PPO 模型 (.zip)
-        ppo_path = self.model_path if self.model_path.endswith(
-            ".zip") else self.model_path + ".zip"
-        if os.path.exists(ppo_path):
-            if self._try_load_ppo(self.model_path.replace(".zip", "")):
-                return
+        # 2. PPO (.zip)
+        if full_path.endswith(".zip"):
+            # SB3 load 不需要扩展名? 不，load(path) 可以带或不带
+            # 但是 MaskablePPO.load 内部可能会补 .zip
+            # 我们传入完整路径去掉 .zip 试试，或者直接传
+            load_path = full_path.replace(".zip", "")
+            if self._try_load_ppo(load_path):
+                print(f"Successfully loaded PPO model: {model_name}")
+                return True
 
-        # 3. 自动搜索最新模型
+        print(f"Failed to load model: {model_name} (Unsupported format or load error)")
+        return False
+
+    def _load_auto(self):
+        """自动加载最新的模型"""
         print("Searching for any valid model in models/...")
-        model_dir = "models"
-        if os.path.exists(model_dir):
-            files = os.listdir(model_dir)
-            # 优先找 .pth, 其次 .zip
-            files.sort(key=lambda x: os.path.getmtime(
-                os.path.join(model_dir, x)), reverse=True)
-
-            # 先找最新的 .pth
-            for f in files:
-                if f.endswith(".pth"):
-                    try:
-                        self.mccfr_model = DeepMCCFRModel(
-                            os.path.join(model_dir, f))
-                        print(
-                            f"Automatically loaded latest Deep MCCFR model: {f}")
-                        return
-                    except:
-                        continue
-
-            # 再找最新的 .zip
-            for f in files:
-                if f.endswith(".zip"):
-                    path = os.path.join(model_dir, f.replace(".zip", ""))
-                    if self._try_load_ppo(path):
-                        print(f"Automatically loaded latest PPO model: {f}")
-                        return
-
+        models = self.list_models()
+        for m in models:
+            if self.load_model(m):
+                return
         print("Warning: No valid AI model found. Using HeuristicAgent as fallback.")
 
     def _try_load_ppo(self, path: str) -> bool:
