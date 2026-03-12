@@ -11,6 +11,7 @@ from src.env.poker_env import PokerEnv
 from src.env.single_agent_wrapper import SingleAgentWrapper
 from src.agent.random_agent import RandomAgent
 from src.agent.heuristic_agent import HeuristicAgent
+from src.agent.model_agent import ModelAgent
 from src.core.hand_type import HandType
 from src.core.card import Card, Rank
 
@@ -66,17 +67,15 @@ class SpringChallengeEvaluator:
             
         env = SingleAgentWrapper(base_env, opponents=opponents)
         
-        # 2. 加载模型并检查维度
+        # 2. 加载模型
         try:
-            model = MaskablePPO.load(model_path)
-            model_obs_shape = model.observation_space.shape
-            env_obs_shape = env.observation_space.shape
-
-            if model_obs_shape != env_obs_shape:
-                print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
-                return None
+            agent = ModelAgent(model_path)
+            # ModelAgent handles dimension mismatch internally now
+            # if model_obs_shape != env_obs_shape:
+            #     print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
+            #     return None
             
-            model.set_env(env)
+            # model.set_env(env)
         except Exception as e:
             print(f"无法加载模型 {model_path}: {e}")
             return None
@@ -110,11 +109,10 @@ class SpringChallengeEvaluator:
             steps = 0
             
             while not (terminated or truncated):
-                mask = env.action_masks()
-                action, _ = model.predict(obs, action_masks=mask, deterministic=True)
+                mask = info.get("action_mask")
                 
-                if isinstance(action, np.ndarray):
-                    action = action.item()
+                # Use ModelAgent act
+                action = agent.act(obs, mask, env.unwrapped.game)
                 
                 obs, reward, terminated, truncated, info = env.step(action)
                 steps += 1
@@ -176,7 +174,8 @@ class SpringChallengeEvaluator:
 if __name__ == "__main__":
     evaluator = SpringChallengeEvaluator(n_episodes=50)
     model_dir = "models"
-    models = [f for f in os.listdir(model_dir) if f.endswith(".zip")]
+    # 支持 PPO (.zip) 和 MCCFR (.pth, .pkl)
+    models = [f for f in os.listdir(model_dir) if f.endswith(".zip") or f.endswith(".pth") or f.endswith(".pkl")]
     
     for m in models:
         evaluator.evaluate_model(os.path.join(model_dir, m), m, opponent_type="heuristic")

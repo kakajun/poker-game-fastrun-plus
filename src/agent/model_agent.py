@@ -17,6 +17,7 @@ class ModelAgent:
         self.ppo_model: Optional[MaskablePPO] = None
         self.mccfr_model: Optional[ModelWrapper] = None
         self.tabular_mccfr: Optional[MCCFRModel] = None
+        self.model_input_dim = 42  # Default dimension
         
         self._load_model()
 
@@ -27,7 +28,18 @@ class ModelAgent:
             # Deep MCCFR 模型
             from src.env.action_space import ActionSpace
             action_space = ActionSpace()
-            self.mccfr_model = ModelWrapper(42, action_space.size, device="cpu")
+            
+            # Detect input dimension from checkpoint
+            try:
+                checkpoint = torch.load(self.model_path, map_location="cpu")
+                if isinstance(checkpoint, dict) and 'regret_net' in checkpoint:
+                     state_dict = checkpoint['regret_net']
+                     if 'fc1.weight' in state_dict:
+                         self.model_input_dim = state_dict['fc1.weight'].shape[1]
+            except Exception as e:
+                print(f"Warning: Failed to inspect checkpoint {self.model_path}: {e}")
+            
+            self.mccfr_model = ModelWrapper(self.model_input_dim, action_space.size, device="cpu")
             self.mccfr_model.load(self.model_path)
         elif self.model_path.endswith(".pkl"):
             # Tabular MCCFR 模型
@@ -58,7 +70,12 @@ class ModelAgent:
 
         # 2. 如果是 Deep MCCFR 模型
         if self.mccfr_model is not None:
-            regrets = self.mccfr_model.predict_regrets(obs)
+            # Handle dimension mismatch
+            if obs.shape[0] > self.model_input_dim:
+                model_obs = obs[:self.model_input_dim]
+            else:
+                model_obs = obs
+            regrets = self.mccfr_model.predict_regrets(model_obs)
             
             # 这里的 action_mask 是 0/1 数组
             if action_mask is not None:

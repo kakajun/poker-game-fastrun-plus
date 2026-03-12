@@ -245,8 +245,16 @@ if __name__ == "__main__":
             benchmark_file = zips[0]
             benchmark_path = os.path.join(model_dir, benchmark_file)
         else:
-            print("错误: 找不到任何基准模型 (.zip)")
-            sys.exit(1)
+            # 尝试寻找 .pth 或 .pkl 作为基准
+            others = [f for f in all_files if f.endswith(".pth") or f.endswith(".pkl")]
+            if others:
+                # 按修改时间排序，选最新的
+                others.sort(key=lambda x: os.path.getmtime(os.path.join(model_dir, x)), reverse=True)
+                benchmark_file = others[0]
+                benchmark_path = os.path.join(model_dir, benchmark_file)
+            else:
+                print("错误: 找不到任何基准模型 (.zip, .pth, .pkl)")
+                sys.exit(1)
 
     # 2. 筛选待测评模型 (所有 .zip, .pth 和 .pkl)
     test_models = [f for f in all_files if (f.endswith(".zip") or f.endswith(
