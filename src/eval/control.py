@@ -96,6 +96,22 @@ def _p_beat(un: int, n: int, u: int, windows) -> float:
     return 1.0 - p_none
 
 
+def blocked_by_evidence(state: GameState, q: int, move: Move) -> bool:
+    """过牌证据是否足以证明 q 管不住 move（确定性结论，不是概率）。
+
+    若 q 在某手 T 上过牌，则 q 手里没有任何能管住 T 的组合。于是当
+    "能管住 move 的任何组合也一定能管住 T"（同型同长且 move 主点数 >= T）
+    时，q 必然管不住 move。
+    """
+    for qq, t in state.pass_log:
+        if qq != q:
+            continue
+        if t.type == move.type and t.length == move.length \
+                and move.max_rank >= t.max_rank:
+            return True
+    return False
+
+
 def keep_lead_prob(state: GameState, player: int, move: Move,
                    cfg: RuleConfig = DEFAULT_RULES) -> float:
     """打出 move 后所有对手都管不起（我继续首出）的概率。"""
@@ -115,6 +131,8 @@ def keep_lead_prob(state: GameState, player: int, move: Move,
             continue
         n = C.total(state.hands[q])
         if n <= 0:
+            continue
+        if blocked_by_evidence(state, q, move):
             continue
         p_all *= (1.0 - _p_beat(un, n, u, windows))
     return max(0.0, min(1.0, p_all))

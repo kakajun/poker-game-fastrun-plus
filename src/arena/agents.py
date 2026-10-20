@@ -57,6 +57,22 @@ class M1Agent(Agent):
         return self.policy.act(state, moves)
 
 
+class M2Agent(Agent):
+    """M1 + 残局精确解（约束采样 + max-n 搜索）。"""
+
+    name = "m2"
+
+    def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
+                 endgame_cards: int = 8, endgame_k: int = 8, seed: int = 0,
+                 guaranteed_lead: bool = True):
+        self.policy = M1Policy(cfg, endgame_cards=endgame_cards,
+                               endgame_k=endgame_k, seed=seed,
+                               guaranteed_lead=guaranteed_lead)
+
+    def act(self, state, moves):
+        return self.policy.act(state, moves)
+
+
 class SearchAgent(Agent):
     """PIMC 雏形（M2/M3 的先行版）：K 个确定性化 + 只搜一轮。"""
 

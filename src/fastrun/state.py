@@ -22,6 +22,9 @@ class GameState:
     over: bool = False
     winner: int = -1
     scores: Tuple[int, int, int] = (0, 0, 0)
+    # 过牌证据: (玩家, 当时管不住的那手牌)。必压规则下"过"等价于"我手里没有任何
+    # 能管住它的组合"，是本规则里最强的推断信息。手牌只减不增，所以证据永久有效。
+    pass_log: Tuple[Tuple[int, Move], ...] = ()
 
     # ------------------------------------------------------------ 构造
 
@@ -79,9 +82,11 @@ class GameState:
             if self.last_play is None:
                 raise ValueError("cannot pass when leading")
             nxt = (self.current + 1) % 3
+            evidence = self.pass_log + ((self.current, self.last_play),)
             if nxt == self.last_player:
-                return replace(self, current=nxt, last_play=None)
-            return replace(self, current=nxt)
+                return replace(self, current=nxt, last_play=None,
+                               pass_log=evidence)
+            return replace(self, current=nxt, pass_log=evidence)
 
         p = self.current
         if not C.subset(move.cards, self.hands[p]):
