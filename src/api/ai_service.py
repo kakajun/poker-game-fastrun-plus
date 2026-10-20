@@ -1,99 +1,76 @@
-import os
-import sys
-import numpy as np
-from typing import Optional, List, Union, Tuple
-from src.core.game import Game
-from src.core.hand_type import Play, HandType
-from src.env.action_space import ActionSpace
-from src.env.obs_encoder import ObsEncoder
-from src.algo.vad_cfr.model import VADCFRModel
+"""AI 服务（M2 策略：拆牌进度 + 确定性保权 + 残局精确解）。
+
+替换旧的 VAD-CFR：
+  * 旧模型与当前动作/观测维度不兼容，加载失败会被当成成功（历史坑）；
+  * 现在的策略是纯规则 + 轻量搜索，决策 1~4ms，行为可解释。
+"""
+
+from typing import Dict, List, Optional, Tuple
+
+from ..eval.decompose import min_steps
+from ..eval.policy_m1 import M1Policy
+from ..fastrun.config import DEFAULT_RULES, RuleConfig
+from ..fastrun.rules import Move
+from ..fastrun.state import GameState
+from .fast_service import describe, play_to_model
+from .models import AIActionThinkingModel, AIThinkingModel
+
+MODELS = ["m2-rule", "m2-search"]
 
 
 class AIService:
-    """
-    AI Service using VAD-CFR (Volatility-Adaptive Discounted Counterfactual Regret Minimization).
-    Replaced all previous algorithms with VAD-CFR as requested.
-    """
+    def __init__(self, cfg: RuleConfig = DEFAULT_RULES):
+        self.cfg = cfg
+        self.current_model = MODELS[0]
+        self.policy = M1Policy(cfg, endgame_cards=8, endgame_k=6,
+                               guaranteed_lead=(self.current_model == "m2-search"))
 
-    def __init__(self, model_path: str = None):
-        self.model_path = model_path
-        self.vad_model: Optional[VADCFRModel] = None
-        self.action_space_manager = ActionSpace()
-        self.obs_encoder = ObsEncoder()
-
-        # Load model on init if path provided, otherwise auto-search
-        if model_path:
-            self.load_model(model_path)
-        else:
-            self._load_auto()
+    # ------------------------------------------------------------------
 
     def list_models(self) -> List[str]:
-        """List all available VAD-CFR models"""
-        model_dir = "models"
-        if not os.path.exists(model_dir):
-            return []
-        files = os.listdir(model_dir)
-        # Assuming VAD-CFR uses .pth format
-        valid_extensions = ('.pth',)
-        models = [f for f in files if f.endswith(valid_extensions)]
-        models.sort(key=lambda x: os.path.getmtime(os.path.join(model_dir, x)), reverse=True)
-        return models
+        return list(MODELS)
 
-    def load_model(self, model_name: str) -> bool:
-        """Load specific VAD-CFR model"""
-        model_dir = "models"
-        if os.path.dirname(model_name):
-            full_path = model_name
-        else:
-            full_path = os.path.join(model_dir, model_name)
-
-        if not os.path.exists(full_path):
-            print(f"Model file not found: {full_path}")
+    def load_model(self, name: str) -> bool:
+        if name not in MODELS:
+            print(f"unknown model: {name}, keep {self.current_model}")
             return False
+        self.current_model = name
+        self.policy = M1Policy(self.cfg, endgame_cards=8, endgame_k=6,
+                               guaranteed_lead=(name == "m2-search"))
+        return True
 
-        print(f"Loading VAD-CFR model: {full_path}...")
-        self.vad_model = None
+    # ------------------------------------------------------------------
 
-        try:
-            self.vad_model = VADCFRModel(full_path)
-            print(f"Successfully loaded VAD-CFR model: {model_name}")
-            return True
-        except Exception as e:
-            print(f"Failed to load VAD-CFR model: {e}")
-            return False
+    def predict(self, state: GameState,
+                return_thinking: bool = False
+                ) -> Tuple[Move, Optional[AIThinkingModel]]:
+        move = self.policy.act(state)
+        thinking = self.build_thinking(state, move) if return_thinking else None
+        return move, thinking
 
-    def _load_auto(self):
-        """Auto-load latest VAD-CFR model"""
-        print("Searching for latest VAD-CFR model...")
-        models = self.list_models()
-        for m in models:
-            if self.load_model(m):
-                return
-        print("Warning: No valid VAD-CFR model found. AI will play randomly or fail.")
+    # ------------------------------------------------------------------
 
-    def predict(self, game: Game, player_idx: int, return_thinking: bool = False) -> Union[Optional[Play], Tuple[Optional[Play], dict]]:
-        """
-        Predict best action using VAD-CFR.
-        """
-        # 1. Get legal actions
-        legal_plays = game.get_legal_actions()
-        if not legal_plays:
-            return (None, {}) if return_thinking else None
-
-        # 2. Use VAD-CFR Model
-        if self.vad_model is not None:
-            try:
-                # Use deterministic strategy for best performance
-                res = self.vad_model.get_action(game, deterministic=True, return_thinking=return_thinking)
-                if return_thinking:
-                    play, thinking = res
-                    return play, (thinking if thinking else None)
-                return res
-            except Exception as e:
-                print(f"VAD-CFR Prediction failed: {e}")
-
-        # 3. Fallback (Random)
-        print("Using Random fallback (Model not loaded or failed)...")
-        import random
-        play = random.choice(legal_plays)
-        return (play, None) if return_thinking else play
+    def build_thinking(self, state: GameState, chosen: Move) -> AIThinkingModel:
+        ranked = self.policy.rank_moves(state)
+        hand = state.hand()
+        weights = [1.0 / (i + 1) for i in range(min(len(ranked), 5))]
+        total = sum(weights) or 1.0
+        top = []
+        for i, m in enumerate(ranked[:5]):
+            steps_after = -1
+            if not m.is_pass:
+                steps_after = min_steps(hand - m.cards, self.cfg)
+            top.append(AIActionThinkingModel(
+                play=describe(m, steps_after),
+                regret=0.0,
+                prob=round(weights[i] / total, 3),
+                cards=[int(c.id) for c in play_to_model(m).cards],
+            ))
+        chosen_steps = -1
+        if not chosen.is_pass:
+            chosen_steps = min_steps(hand - chosen.cards, self.cfg)
+        return AIThinkingModel(
+            player_idx=state.current,
+            top_actions=top,
+            chosen_play=describe(chosen, chosen_steps),
+        )

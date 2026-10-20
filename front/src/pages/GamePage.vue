@@ -69,7 +69,7 @@ const handlePass = () => {
               <div class="h-full bg-blue-400" :style="{ width: (action.prob * 100) + '%' }"></div>
             </div>
             <div class="flex justify-between mt-1 text-[10px] text-white/40">
-              <span>Regret: {{ action.regret.toFixed(4) }}</span>
+              <span>权重: {{ (action.prob * 100).toFixed(0) }}%</span>
               <span v-if="action.play === gameStore.thinking?.chosen_play" class="text-blue-400 font-bold">CHOSEN</span>
             </div>
           </div>

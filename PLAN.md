@@ -140,6 +140,23 @@ M2 = 过牌证据采样 + 确定性保权 + 残局精确解（`src/infer/*`、`s
 
 因此下一步不是加数据量，而是改学习目标（见 §4 的 M3-B'）。
 
+## 3.9 M5 集成（2026-10-20，API 已切到 fastrun 引擎）
+
+| 变更 | 说明 |
+|---|---|
+| `src/api/fast_service.py`（新） | 会话/规则/DTO 适配。会话状态 = `fastrun.GameState`，前端 DTO 完全不变 |
+| `src/api/ai_service.py`（重写） | 后端换成 M2 策略（拆牌进度 + 确定性保权 + 残局解），`/models` 返回 `m2-rule` / `m2-search` |
+| `src/api/app.py`（重写） | 五个端点签名不变；人类固定 0 号位先手；只对真人返回 `legal_actions` |
+| `src/api/session_manager.py` | 兼容层，指向 `FastSession` |
+| `front/src/pages/GamePage.vue` | 思考面板 "Regret" 改为"权重"（现在是候选排序权重，不是遗憾值） |
+| `tests/test_api_flow.py`（新） | 120 局端到端 + 非法牌 + 顶大 + 必压 + DTO 往返，全绿 |
+
+实测：
+* `python tests/test_api_flow.py` → 6/6 通过（20s）；
+* uvicorn 冒烟：`/models` → `m2-rule, m2-search`；`/game/start` → `current=0`、15 张手牌、69 个合法动作；
+  人类出牌 → `current=1`、手牌 14；`/game/{id}/ai` → `current=2`，返回 `thinking.chosen_play`（如"单张 7 · 剩3手"）。
+* 旧 `src/core`、`src/env`、`src/algo` 保留未删，但 **API 已不再使用**（`game.py` 的顶大反向 bug 因此不影响线上）。
+
 ## 4. 里程碑
 
 - **M0（3~4 天）**：`fastrun` 引擎 + 规则用例 + 随机对局不变量测试（牌张守恒、分数零和、动作合法性）。
