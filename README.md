@@ -50,7 +50,6 @@ pip install fastapi uvicorn pydantic numpy pandas matplotlib
 后端提供游戏逻辑和 AI 推理接口。
 
 ```bash
-# 在项目根目录下运行
 python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -78,7 +77,7 @@ npm run dev
 项目采用 VAD-CFR 算法进行自博弈训练。支持多进程异步采样与 GPU 集中训练。
 
 ```bash
-# 运行 VAD-CFR 训练脚本
+
 $env:PYTHONPATH="."; python src/train_vad_cfr.py
 ```
 
@@ -98,8 +97,8 @@ $env:PYTHONPATH="."; python src/train_vad_cfr.py
 - **效率**: 获胜平均步数。
 
 ### 2. 运行评估
+
 ```bash
-# 运行模型对弈测评 (自动对比 models 目录下的 .pth 模型)
 $env:PYTHONPATH="."; python src/evaluate/evaluator.py
 ```
 

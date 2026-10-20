@@ -11,6 +11,17 @@ class PlayModel(BaseModel):
     length: int
     max_rank: int
 
+class AIActionThinkingModel(BaseModel):
+    play: str
+    regret: float
+    prob: float
+    cards: List[int] # Card IDs
+
+class AIThinkingModel(BaseModel):
+    player_idx: int
+    top_actions: List[AIActionThinkingModel]
+    chosen_play: str
+
 class GameStateModel(BaseModel):
     game_id: str
     current_player: int
@@ -29,6 +40,9 @@ class GameStateModel(BaseModel):
     # 合法动作 (仅针对当前玩家，用于辅助前端)
     # 如果仅包含 PASS，说明要不起
     legal_actions: List[PlayModel]
+    
+    # AI 思考过程 (可选，仅当 AI 决策时提供)
+    thinking: Optional[AIThinkingModel] = None
 
 class GameStartRequest(BaseModel):
     model_name: Optional[str] = None

@@ -36,8 +36,11 @@ class ModelAgent:
         Needs 'game' object because VAD-CFR model uses Game state for encoding/inference.
         """
         if self.vad_model is not None and game is not None:
+            # Check for verbose flag in environment
+            verbose = os.environ.get('AI_VERBOSE', '0') == '1'
+            
             # VAD-CFR get_action returns a Play object
-            play = self.vad_model.get_action(game, deterministic=self.deterministic)
+            play = self.vad_model.get_action(game, deterministic=self.deterministic, verbose=verbose)
             if play:
                 return self.action_space.get_id(play)
         

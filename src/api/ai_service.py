@@ -1,7 +1,7 @@
 import os
 import sys
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Union, Tuple
 from src.core.game import Game
 from src.core.hand_type import Play, HandType
 from src.env.action_space import ActionSpace
@@ -71,24 +71,29 @@ class AIService:
                 return
         print("Warning: No valid VAD-CFR model found. AI will play randomly or fail.")
 
-    def predict(self, game: Game, player_idx: int) -> Optional[Play]:
+    def predict(self, game: Game, player_idx: int, return_thinking: bool = False) -> Union[Optional[Play], Tuple[Optional[Play], dict]]:
         """
         Predict best action using VAD-CFR.
         """
         # 1. Get legal actions
         legal_plays = game.get_legal_actions()
         if not legal_plays:
-            return None
+            return (None, {}) if return_thinking else None
 
         # 2. Use VAD-CFR Model
         if self.vad_model is not None:
             try:
                 # Use deterministic strategy for best performance
-                return self.vad_model.get_action(game, deterministic=True)
+                res = self.vad_model.get_action(game, deterministic=True, return_thinking=return_thinking)
+                if return_thinking:
+                    play, thinking = res
+                    return play, (thinking if thinking else None)
+                return res
             except Exception as e:
                 print(f"VAD-CFR Prediction failed: {e}")
 
-        # 3. Fallback (Random) - Should not happen if model is loaded
+        # 3. Fallback (Random)
         print("Using Random fallback (Model not loaded or failed)...")
         import random
-        return random.choice(legal_plays)
+        play = random.choice(legal_plays)
+        return (play, None) if return_thinking else play

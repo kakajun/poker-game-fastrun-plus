@@ -1,4 +1,4 @@
 Model,Opponent,Win Rate,Avg Score,Avg Steps (Win),Avg Loss Cards,Spring Rate,Bomb Freq,Rule Violation
-deep_mccfr_extreme.pth,2.pth,0.64,-20.36,14.28125,2.3333333333333335,0.0,0.0,0.0
-vad_cfr.pth,2.pth,0.28,-44.08,15.785714285714286,4.027777777777778,0.0,0.0,0.0
-deep_mccfr_extreme.pth (Latest),vad_cfr.pth,0.38,-37.56,14.421052631578947,3.903225806451613,0.0,0.0,0.0
+vad_cfr_best.pth,vad_cfr.pth,0.14,-51.16,15.285714285714286,3.116279069767442,0.0,0.0,0.0
+vad_cfr_pruned.pth,vad_cfr.pth,0.16,-42.96,15.375,3.0952380952380953,0.0,0.0,0.0
+vad_cfr_pruned.pth (Latest),vad_cfr.pth,0.2,-46.7,14.5,3.85,0.0,0.0,0.0

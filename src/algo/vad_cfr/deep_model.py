@@ -4,33 +4,46 @@ import torch.nn.functional as F
 import numpy as np
 from typing import List, Optional
 
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super(ResBlock, self).__init__()
+        self.fc = nn.Linear(dim, dim)
+        self.ln = nn.LayerNorm(dim)
+        
+    def forward(self, x):
+        return x + F.relu(self.ln(self.fc(x)))
+
 class DeepRegretNet(nn.Module):
     def __init__(self, state_dim: int, action_dim: int):
         super(DeepRegretNet, self).__init__()
         # VAD-CFR benefits from larger capacity to capture volatile dynamics
-        self.fc1 = nn.Linear(state_dim, 1024)
-        self.fc2 = nn.Linear(1024, 1024)
-        self.fc3 = nn.Linear(1024, 512)
+        self.fc_in = nn.Linear(state_dim, 1024)
+        self.res1 = ResBlock(1024)
+        self.res2 = ResBlock(1024)
+        self.fc_mid = nn.Linear(1024, 512)
         self.head = nn.Linear(512, action_dim)
         
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = F.relu(self.fc_in(x))
+        x = self.res1(x)
+        x = self.res2(x)
+        x = F.relu(self.fc_mid(x))
         return self.head(x)
 
 class DeepStrategyNet(nn.Module):
     def __init__(self, state_dim: int, action_dim: int):
         super(DeepStrategyNet, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 1024)
-        self.fc2 = nn.Linear(1024, 1024)
-        self.fc3 = nn.Linear(1024, 512)
+        self.fc_in = nn.Linear(state_dim, 1024)
+        self.res1 = ResBlock(1024)
+        self.res2 = ResBlock(1024)
+        self.fc_mid = nn.Linear(1024, 512)
         self.head = nn.Linear(512, action_dim)
         
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = F.relu(self.fc_in(x))
+        x = self.res1(x)
+        x = self.res2(x)
+        x = F.relu(self.fc_mid(x))
         return F.softmax(self.head(x), dim=-1)
 
 class ModelWrapper:

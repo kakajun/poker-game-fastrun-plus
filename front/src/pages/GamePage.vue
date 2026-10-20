@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useGameStore } from '../store/game';
 import Hand from '../components/Hand.vue';
@@ -9,6 +9,7 @@ import { canBeat, analyzeHand, HandType } from '../lib/rules';
 
 const route = useRoute();
 const gameStore = useGameStore();
+const showThinking = ref(true);
 
 onMounted(() => {
   const modelName = route.query.model as string | undefined;
@@ -29,7 +30,52 @@ const handlePass = () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-green-800 flex flex-col justify-between p-4 overflow-hidden">
+  <div class="min-h-screen bg-green-800 flex flex-col justify-between p-4 overflow-hidden relative">
+    <!-- AI Thinking Side Panel -->
+    <div 
+      v-if="gameStore.thinking"
+      class="fixed right-4 top-24 w-80 bg-black/60 backdrop-blur-md text-white rounded-xl shadow-2xl border border-white/20 z-40 transition-all duration-300"
+      :class="showThinking ? 'translate-x-0' : 'translate-x-72'"
+    >
+      <div class="p-4 flex justify-between items-center border-b border-white/10">
+        <h3 class="font-bold flex items-center gap-2">
+          <span class="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+          AI Thinking Process
+        </h3>
+        <button @click="showThinking = !showThinking" class="text-white/50 hover:text-white">
+          {{ showThinking ? '→' : '←' }}
+        </button>
+      </div>
+      
+      <div v-if="showThinking" class="p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+        <div class="mb-4">
+          <div class="text-xs text-white/50 uppercase mb-1">Target Player</div>
+          <div class="font-bold text-yellow-400">Player {{ gameStore.thinking.player_idx }}</div>
+        </div>
+        
+        <div class="space-y-3">
+          <div class="text-xs text-white/50 uppercase">Evaluated Actions</div>
+          <div v-for="action in gameStore.thinking.top_actions" :key="action.play" 
+            class="p-2 rounded bg-white/5 border border-white/5 hover:bg-white/10 transition"
+            :class="{'border-blue-400/50 bg-blue-400/10': action.play === gameStore.thinking?.chosen_play}"
+          >
+            <div class="flex justify-between items-start mb-1">
+              <div class="font-medium text-sm truncate max-w-[160px]">{{ action.play }}</div>
+              <div class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                {{ (action.prob * 100).toFixed(1) }}%
+              </div>
+            </div>
+            <div class="flex items-center gap-2 h-1 bg-white/10 rounded overflow-hidden">
+              <div class="h-full bg-blue-400" :style="{ width: (action.prob * 100) + '%' }"></div>
+            </div>
+            <div class="flex justify-between mt-1 text-[10px] text-white/40">
+              <span>Regret: {{ action.regret.toFixed(4) }}</span>
+              <span v-if="action.play === gameStore.thinking?.chosen_play" class="text-blue-400 font-bold">CHOSEN</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     <!-- Top Area: Opponents -->
     <div class="flex justify-between items-start px-8 pt-16 relative">
       <!-- Auto-play Toggle Button -->

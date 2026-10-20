@@ -31,6 +31,19 @@ export interface Player {
 
 export type GameStatus = 'lobby' | 'playing' | 'settlement';
 
+export interface ThinkingAction {
+  play: string;
+  regret: number;
+  prob: number;
+  cards: number[];
+}
+
+export interface Thinking {
+  player_idx: number;
+  top_actions: ThinkingAction[];
+  chosen_play: string;
+}
+
 export interface GameState {
   status: GameStatus;
   players: Player[];
@@ -40,4 +53,5 @@ export interface GameState {
   lastPlayerIndex: number | null; // who played the last cards
   deck: Card[];
   winnerId: string | null;
+  thinking?: Thinking;
 }

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict
+from typing import List, Dict, Optional
 import uvicorn
 import os
 import sys
@@ -45,7 +45,7 @@ def _convert_play_to_model(play: Play) -> PlayModel:
         max_rank=play.max_rank.value if hasattr(play.max_rank, 'value') else play.max_rank
     )
 
-def _convert_game_to_state(game: Game, game_id: str) -> GameStateModel:
+def _convert_game_to_state(game: Game, game_id: str, thinking: Optional[Dict] = None) -> GameStateModel:
     hands = []
     for h in game.hands:
         hands.append([_convert_card_to_model(c) for c in h])
@@ -67,7 +67,8 @@ def _convert_game_to_state(game: Game, game_id: str) -> GameStateModel:
         scores=game.scores,
         cards_played_count=game.cards_played_count,
         bomb_scores=game.bomb_scores,
-        legal_actions=legal_models
+        legal_actions=legal_models,
+        thinking=thinking
     )
 
 @app.get("/models", response_model=List[str])
@@ -187,8 +188,8 @@ def trigger_ai(game_id: str):
     if game.is_over:
         return _convert_game_to_state(game, game_id)
 
-    # Predict (Even for human if auto-play is requested)
-    action = ai_service.predict(game, game.current_player)
+    # Predict with thinking process
+    action, thinking = ai_service.predict(game, game.current_player, return_thinking=True)
 
     if action:
         game.step(action)
@@ -201,7 +202,7 @@ def trigger_ai(game_id: str):
         except:
             raise HTTPException(status_code=500, detail="AI failed to act")
 
-    return _convert_game_to_state(game, game_id)
+    return _convert_game_to_state(game, game_id, thinking=thinking)
 
 if __name__ == "__main__":
     uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True)
