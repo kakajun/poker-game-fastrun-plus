@@ -33,7 +33,7 @@ def load_parts(pattern: str):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", type=str, default="data/value_train.part*.npz")
+    ap.add_argument("--data", type=str, default="data/value_train.w*.npz")
     ap.add_argument("--epochs", type=int, default=12)
     ap.add_argument("--batch", type=int, default=4096)
     ap.add_argument("--lr", type=float, default=1e-3)
