@@ -73,6 +73,65 @@ class M2Agent(Agent):
         return self.policy.act(state, moves)
 
 
+class ValueAgent(Agent):
+    """M1 候选 + 价值网 1-ply 评估（M3-A）。
+
+    torch 延迟导入：WSL 里没有 torch 时其它模块仍可正常使用。
+    """
+
+    name = "value"
+
+    def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
+                 model_path: str = "models/value_v1.pt",
+                 top_k: int = 8, win_weight: float = 1.0,
+                 prior: float = 0.05, device: str = "cuda"):
+        self.cfg = cfg
+        self.policy = M1Policy(cfg)
+        self.top_k = top_k
+        self.win_weight = win_weight
+        self.prior = prior
+        self.model_path = model_path
+        self.device = device
+        self._model = None
+        self._torch = None
+
+    def _load(self):
+        if self._model is not None:
+            return
+        import torch
+        from ..net.model import load
+        from ..net.encode import DIM
+        model, _ = load(self.model_path, map_location=self.device)
+        model.to(self.device)
+        self._torch = torch
+        self._model = model
+        self._dim = DIM
+
+    def act(self, state, moves):
+        ms = list(state.legal_moves(self.cfg) if moves is None else moves)
+        if len(ms) <= 1:
+            return ms[0]
+        ranked = self.policy.rank_moves(state, ms)
+        if ranked[0].is_pass:
+            return ranked[0]
+        cands = ranked[:self.top_k]
+        if len(cands) == 1:
+            return cands[0]
+
+        self._load()
+        from ..net.encode import encode
+        import numpy as np
+        me = state.current
+        feats = np.stack([encode(state.apply(m, self.cfg), me, self.cfg)
+                          for m in cands])
+        with self._torch.no_grad():
+            xb = self._torch.from_numpy(feats).to(self.device)
+            s, logit = self._model(xb)
+            vals = (s + self.win_weight * self._torch.sigmoid(logit)).cpu().numpy()
+        best = int(np.argmax(vals + self.prior * np.linspace(0, -1, len(cands))))
+        return cands[best]
+
+
 class SearchAgent(Agent):
     """PIMC 雏形（M2/M3 的先行版）：K 个确定性化 + 只搜一轮。"""
 
