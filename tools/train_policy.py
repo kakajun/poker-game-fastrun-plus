@@ -301,7 +301,7 @@ def train_one(data, train_idx, val_idx, args, seed, device):
             loss.backward()
             opt.step()
             sched.step()
-            tot += float(loss)
+            tot += float(loss.detach())
             steps += 1
 
         val = evaluate(model, val_ds, args, device)

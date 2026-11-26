@@ -330,8 +330,9 @@ class PolicyAgent(Agent):
         self._torch = torch
         self._model = model
 
-    def evaluate(self, state, moves):
+    def evaluate(self, state, moves=None):
         """返回 (moves, 胜率概率, 净分预测)，供策略与解释层共用。"""
+        import numpy as np
         ms = list(state.legal_moves(self.cfg) if moves is None else moves)
         if not ms:
             return [], np.asarray([]), np.asarray([])
@@ -339,7 +340,6 @@ class PolicyAgent(Agent):
             return ms, np.asarray([1.0]), np.asarray([0.0])
 
         self._load()
-        import numpy as np
         from ..net.encode_v3 import (encode_history, encode_move_set,
                                      encode_state)
         me = state.current
@@ -355,7 +355,7 @@ class PolicyAgent(Agent):
             score = score[0].cpu().numpy()
         return ms, 1.0 / (1.0 + np.exp(-win)), score
 
-    def act(self, state, moves):
+    def act(self, state, moves=None):
         import numpy as np
         ms, prob, score = self.evaluate(state, moves)
         if len(ms) <= 1:
