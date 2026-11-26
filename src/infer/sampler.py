@@ -8,7 +8,7 @@
 """
 
 import random
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import List, Sequence, Tuple
 
 from ..fastrun import cards as C
@@ -16,6 +16,21 @@ from ..fastrun import moves as M
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
 from ..fastrun.rules import Move
 from ..fastrun.state import GameState
+
+
+class SamplingError(RuntimeError):
+    """约束过紧，无法在一定尝试内采到一致的隐藏世界。"""
+
+
+@dataclass
+class WorldSampleReport:
+    worlds: List[GameState]
+    failures: int
+    max_failures: int
+
+    @property
+    def total(self) -> int:
+        return len(self.worlds)
 
 
 def _uniform_world(state: GameState, player: int,
@@ -52,21 +67,50 @@ def consistent(world: GameState, state: GameState, player: int,
 
 def sample_world(state: GameState, player: int, rng: random.Random,
                  cfg: RuleConfig = DEFAULT_RULES,
-                 max_tries: int = 40) -> GameState:
-    """在证据约束下采一个世界；约束过紧时退化为无约束采样。"""
-    world = _uniform_world(state, player, rng)
-    for _ in range(max_tries - 1):
+                 max_tries: int = 40, strict: bool = True) -> GameState:
+    """在证据约束下采一个世界。
+
+    strict=True 时失败显式抛错；只有明确需要退避的调用方才允许 strict=False。
+    """
+    fallback = None
+    for _ in range(max(1, max_tries)):
+        world = _uniform_world(state, player, rng)
+        fallback = world
         if consistent(world, state, player, cfg):
             return world
-        world = _uniform_world(state, player, rng)
-    return world
+    if strict:
+        raise SamplingError(
+            f"no consistent world for player {player} after {max_tries} tries")
+    return fallback
 
 
 def sample_worlds(state: GameState, player: int, k: int,
                   cfg: RuleConfig = DEFAULT_RULES,
-                  seed: int = 0) -> List[GameState]:
+                  seed: int = 0, max_tries: int = 40,
+                  strict: bool = True) -> List[GameState]:
     rng = random.Random(seed)
-    return [sample_world(state, player, rng, cfg) for _ in range(k)]
+    return [sample_world(state, player, rng, cfg, max_tries, strict)
+            for _ in range(k)]
+
+
+def sample_worlds_report(state: GameState, player: int, k: int,
+                         cfg: RuleConfig = DEFAULT_RULES,
+                         seed: int = 0, max_tries: int = 40
+                         ) -> WorldSampleReport:
+    """数据生成专用：逐世界尝试，失败世界按无约束退避并显式计数。"""
+    rng = random.Random(seed)
+    worlds: List[GameState] = []
+    failures = 0
+    for _ in range(k):
+        try:
+            world = sample_world(state, player, rng, cfg, max_tries,
+                                 strict=True)
+        except SamplingError:
+            failures += 1
+            world = sample_world(state, player, rng, cfg, 1, strict=False)
+        worlds.append(world)
+    return WorldSampleReport(worlds=worlds, failures=failures,
+                             max_failures=max_tries)
 
 
 def evidence_summary(state: GameState, player: int) -> List[Tuple[int, Move]]:

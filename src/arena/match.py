@@ -1,17 +1,16 @@
 """同牌多座位对局与报表。
 
-为什么必须 duplicate-deal:
-  一局跑得快的运气成分极大（手牌质量 + 首出权）。让 hero 在同一个发牌上坐
-  0/1/2 三个座位各打一次，能把"牌运"对称掉，剩下的差异才反映策略强弱。
-
-为什么必须报置信区间:
-  200 局上 ±3% 的波动足以让"提升"变噪声。所有结论以 Wilson CI 为准。
+旧 `run_duplicate` 保留为 3 座位兼容接口；v3 验收使用
+`run_duplicate_permutations`（hero/两个对手共 6 种排列）和
+`paired_bootstrap_diff`（按 deal 聚类，不把同牌各座位当独立样本）。
 """
 
+import itertools
 import math
+import random
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
 from ..fastrun.state import GameState
@@ -28,6 +27,33 @@ def wilson(k: int, n: int, z: float = 1.96) -> Tuple[float, float]:
     return (max(0.0, (c - half) / d), min(1.0, (c + half) / d))
 
 
+@dataclass(frozen=True)
+class GameRecord:
+    deal_id: int
+    layout: int
+    hero_seat: int
+    win: int
+    score: float
+    ms: float
+
+
+@dataclass
+class PairedDiff:
+    n_deals: int
+    n_games: int
+    win_diff: float
+    win_ci: Tuple[float, float]
+    score_diff: float
+    score_ci: Tuple[float, float]
+
+    def __str__(self) -> str:
+        return (f"deals={self.n_deals} games={self.n_games} "
+                f"Δwin={self.win_diff:+.2%} "
+                f"[{self.win_ci[0]:+.2%},{self.win_ci[1]:+.2%}] "
+                f"Δscore={self.score_diff:+.3f} "
+                f"[{self.score_ci[0]:+.3f},{self.score_ci[1]:+.3f}]")
+
+
 @dataclass
 class MatchReport:
     label: str
@@ -38,6 +64,7 @@ class MatchReport:
     spring_rate: float
     avg_ms: float
     ci: Tuple[float, float]
+    records: Tuple[GameRecord, ...] = ()
 
     @property
     def win_rate(self) -> float:
@@ -120,4 +147,96 @@ def run_duplicate(hero: Agent, villains: Sequence[Agent],
         spring_rate=springs / wins if wins else 0.0,
         avg_ms=ms_sum / n,
         ci=wilson(wins, n),
+    )
+
+
+def run_duplicate_permutations(hero: Agent, villains: Sequence[Agent],
+                               n_deals: int = 200,
+                               cfg: RuleConfig = DEFAULT_RULES,
+                               seed0: int = 1,
+                               deal_ids: Optional[Sequence[int]] = None
+                               ) -> MatchReport:
+    """同一副牌跑 hero/两个对手的全部 6 种座位排列。"""
+    if len(villains) != 2:
+        raise ValueError("need exactly 2 villains")
+    participants = [hero] + list(villains)
+    layouts = list(itertools.permutations(range(3)))
+    records: List[GameRecord] = []
+    wins = losses = springs = 0
+    score_sum = 0.0
+    ms_sum = 0.0
+    deals = list(deal_ids) if deal_ids is not None else [
+        seed0 + d for d in range(n_deals)]
+
+    for deal_id in deals:
+        base = GameState.new(deal_id)
+        for layout_i, perm in enumerate(layouts):
+            for a in participants:
+                a.reset()
+            agents = [participants[perm[s]] for s in range(3)]
+            hero_seat = perm.index(0)
+            st = GameState.from_hands(base.hands, current=base.current)
+            st, avg_ms = play_game(agents, cfg, st, hero_seat=hero_seat)
+            win = 1 if st.winner == hero_seat else 0
+            score = float(st.scores[hero_seat])
+            records.append(GameRecord(
+                deal_id=deal_id, layout=layout_i, hero_seat=hero_seat,
+                win=win, score=score, ms=avg_ms))
+            wins += win
+            losses += 1 - win
+            score_sum += score
+            ms_sum += avg_ms
+            if win and any(st.tricks[q] == 0 for q in range(3)
+                           if q != hero_seat):
+                springs += 1
+
+    n = len(records)
+    return MatchReport(
+        label=f"{hero.name} vs {'+'.join(v.name for v in villains)}",
+        n=n, wins=wins, losses=losses, avg_score=score_sum / n,
+        spring_rate=springs / wins if wins else 0.0, avg_ms=ms_sum / n,
+        ci=wilson(wins, n), records=tuple(records),
+    )
+
+
+def paired_bootstrap_diff(hero: MatchReport, baseline: MatchReport,
+                          n_boot: int = 4000,
+                          seed: int = 0) -> PairedDiff:
+    """按 deal 聚类重采样；要求两份报表使用相同 deals/layout。"""
+    if n_boot < 100:
+        raise ValueError("n_boot must be >= 100")
+    ha = {(r.deal_id, r.layout): r for r in hero.records}
+    hb = {(r.deal_id, r.layout): r for r in baseline.records}
+    if set(ha) != set(hb):
+        raise ValueError("paired reports must share deals/layouts")
+
+    per_deal_w: Dict[int, List[float]] = {}
+    per_deal_s: Dict[int, List[float]] = {}
+    for key, ra in ha.items():
+        rb = hb[key]
+        per_deal_w.setdefault(key[0], []).append(float(ra.win - rb.win))
+        per_deal_s.setdefault(key[0], []).append(ra.score - rb.score)
+
+    deals = sorted(per_deal_w)
+    all_w = [x for d in deals for x in per_deal_w[d]]
+    all_s = [x for d in deals for x in per_deal_s[d]]
+    win_diff = sum(all_w) / len(all_w)
+    score_diff = sum(all_s) / len(all_s)
+
+    rng = random.Random(seed)
+    boot_w, boot_s = [], []
+    for _ in range(n_boot):
+        sample = [deals[rng.randrange(len(deals))] for _ in deals]
+        bw = [x for d in sample for x in per_deal_w[d]]
+        bs = [x for d in sample for x in per_deal_s[d]]
+        boot_w.append(sum(bw) / len(bw))
+        boot_s.append(sum(bs) / len(bs))
+    boot_w.sort()
+    boot_s.sort()
+    lo = int(0.025 * (n_boot - 1))
+    hi = int(0.975 * (n_boot - 1))
+    return PairedDiff(
+        n_deals=len(deals), n_games=len(ha),
+        win_diff=win_diff, win_ci=(boot_w[lo], boot_w[hi]),
+        score_diff=score_diff, score_ci=(boot_s[lo], boot_s[hi]),
     )

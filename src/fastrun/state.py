@@ -25,6 +25,9 @@ class GameState:
     # 过牌证据: (玩家, 当时管不住的那手牌)。必压规则下"过"等价于"我手里没有任何
     # 能管住它的组合"，是本规则里最强的推断信息。手牌只减不增，所以证据永久有效。
     pass_log: Tuple[Tuple[int, Move], ...] = ()
+    # 完整、有序的公开动作（含 PASS），供序列特征与复盘使用。
+    # 不参与规则判定；搜索置换表也不应把它算进状态键。
+    action_log: Tuple[Tuple[int, Move], ...] = ()
 
     # ------------------------------------------------------------ 构造
 
@@ -47,7 +50,8 @@ class GameState:
     def from_hands(cls, hands: Sequence, current: int = 0,
                    last_play: Optional[Move] = None,
                    last_player: Optional[int] = None,
-                   tricks: Sequence[int] = (0, 0, 0)) -> "GameState":
+                   tricks: Sequence[int] = (0, 0, 0),
+                   action_log: Sequence[Tuple[int, Move]] = ()) -> "GameState":
         hs = []
         for h in hands:
             if isinstance(h, int):
@@ -59,7 +63,8 @@ class GameState:
         hs = tuple(hs)
         lp = current if last_player is None else last_player
         return cls(hands=hs, current=current, last_play=last_play,
-                   last_player=lp, tricks=tuple(tricks))
+                   last_player=lp, tricks=tuple(tricks),
+                   action_log=tuple(action_log))
 
     # ------------------------------------------------------------ 查询
 
@@ -84,10 +89,12 @@ class GameState:
                 raise ValueError("cannot pass when leading")
             nxt = (self.current + 1) % 3
             evidence = self.pass_log + ((self.current, self.last_play),)
+            history = self.action_log + ((self.current, move),)
             if nxt == self.last_player:
                 return replace(self, current=nxt, last_play=None,
-                               pass_log=evidence)
-            return replace(self, current=nxt, pass_log=evidence)
+                               pass_log=evidence, action_log=history)
+            return replace(self, current=nxt, pass_log=evidence,
+                           action_log=history)
 
         p = self.current
         if not C.subset(move.cards, self.hands[p]):
@@ -115,17 +122,19 @@ class GameState:
 
         hands = list(self.hands)
         hands[p] = hand
+        history = self.action_log + ((p, move),)
 
         if hand == 0:
             scores = self._final_scores(hands, tricks, bombs, p, cfg)
             return replace(self, hands=tuple(hands), played=played,
                            tricks=tuple(tricks), bombs=tuple(bombs),
                            over=True, winner=p, scores=tuple(scores),
-                           last_play=move, last_player=p)
+                           last_play=move, last_player=p, action_log=history)
 
         return replace(self, hands=tuple(hands), played=played,
                        tricks=tuple(tricks), bombs=tuple(bombs),
-                       current=(p + 1) % 3, last_play=move, last_player=p)
+                       current=(p + 1) % 3, last_play=move, last_player=p,
+                       action_log=history)
 
     # ------------------------------------------------------------ 计分
 

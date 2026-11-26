@@ -31,7 +31,7 @@ def _gen_range(task):
     wid, start, n_games, eps, out_prefix, chunk, seed_base = task
     policy = M1Agent(CFG)
     rng = random.Random(seed_base * 131 + wid)
-    xs, ys, ws = [], [], []
+    xs, ys, ws, deal_ids, game_ids = [], [], [], [], []
     samples = 0
 
     def flush(part):
@@ -41,12 +41,15 @@ def _gen_range(task):
         np.savez_compressed(path,
                             x=np.stack(xs).astype(np.float16),
                             y=np.asarray(ys, dtype=np.float32),
-                            w=np.asarray(ws, dtype=np.float32))
-        xs.clear(); ys.clear(); ws.clear()
+                            w=np.asarray(ws, dtype=np.float32),
+                            deal_id=np.asarray(deal_ids, dtype=np.int64),
+                            game_id=np.asarray(game_ids, dtype=np.int64))
+        xs.clear(); ys.clear(); ws.clear(); deal_ids.clear(); game_ids.clear()
 
     part = 0
     for i in range(n_games):
-        st = GameState.new(seed_base + (start + i) * 7919)
+        deal_id = seed_base + (start + i) * 7919
+        st = GameState.new(deal_id)
         traj = []
         while not st.over:
             p = st.current
@@ -62,6 +65,8 @@ def _gen_range(task):
             xs.append(feats)
             ys.append(min(max(st.scores[p], -90), 90) / 30.0)
             ws.append(1.0 if st.winner == p else 0.0)
+            deal_ids.append(deal_id)
+            game_ids.append(i)
         samples += len(traj)
         if (i + 1) % chunk == 0:
             flush(part)

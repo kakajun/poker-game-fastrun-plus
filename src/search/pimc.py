@@ -16,7 +16,7 @@ from ..fastrun import cards as C
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
 from ..fastrun.rules import Move, MoveType
 from ..fastrun.state import GameState
-from ..infer.sampler import sample_world
+from ..infer.sampler import SamplingError, sample_world
 from ..eval.decompose import min_steps
 
 
@@ -83,8 +83,12 @@ def choose(state: GameState, cfg: RuleConfig = DEFAULT_RULES,
     me = state.current
     rng = random.Random(seed)
     worlds: List[GameState] = []
-    for _ in range(k):
-        worlds.append(sample_world(state, me, rng))
+    try:
+        for _ in range(k):
+            worlds.append(sample_world(state, me, rng))
+    except SamplingError:
+        # 不拿不满足 Pass 证据的世界做搜索；退回启发式候选首位。
+        return cands[0]
 
     best_val = -1e18
     best: Optional[Move] = None

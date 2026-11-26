@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import Agent, GreedyMinAgent, RandomAgent
+from src.arena.agents import Agent, GreedyMinAgent
 from src.arena.match import run_duplicate
 from src.eval.control import burn_cost, keep_lead_prob
 from src.eval.decompose import min_steps
@@ -81,16 +81,12 @@ def main():
         def act(self, state, moves):
             return self.fn(state, moves)
 
-    print(f"{'mode/safe_p':<14}{'vs random':>11}{'vs greedy':>11}{'score_g':>9}")
+    print(f"{'mode/safe_p':<14}{'vs greedy':>11}{'score_g':>9}")
     for mode, sp in [(1, 0.8), (2, 0.8), (2, 0.7), (3, 0.8)]:
-        a = Fn(f"m{mode}", make_policy(mode, sp))
-        r1 = run_duplicate(a, [RandomAgent(1), RandomAgent(2)],
-                           n_deals=args.deals, seed0=31)
         a2 = Fn(f"m{mode}", make_policy(mode, sp))
         r2 = run_duplicate(a2, [GreedyMinAgent(), GreedyMinAgent()],
                            n_deals=args.deals, seed0=31)
-        print(f"{f'{mode}/{sp}':<14}{r1.win_rate:>10.1%}{r2.win_rate:>11.1%}"
-              f"{r2.avg_score:>+9.2f}")
+        print(f"{f'{mode}/{sp}':<14}{r2.win_rate:>11.1%}{r2.avg_score:>+9.2f}")
 
 
 if __name__ == "__main__":

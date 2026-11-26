@@ -15,20 +15,43 @@ import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.net.model import ValueNet, save
+from src.fastrun.config import DEFAULT_RULES
+from src.net.model import ENGINE_VERSION, ValueNet, save
 
 
 def load_parts(pattern: str):
     files = sorted(glob.glob(pattern))
     if not files:
         raise SystemExit(f"no data: {pattern}")
-    xs, ys, ws = [], [], []
+    xs, ys, ws, deals = [], [], [], []
     for f in files:
         d = np.load(f)
         xs.append(d["x"]); ys.append(d["y"]); ws.append(d["w"])
+        if "deal_id" in d:
+            deals.append(d["deal_id"])
+        else:
+            print(f"  WARNING: {f} has no deal_id; using sample ids")
+            deals.append(np.arange(len(d["y"]), dtype=np.int64) + len(deals) * 10**9)
         print(f"  loaded {f}: {len(d['y'])}")
     return (np.concatenate(xs).astype(np.float32),
-            np.concatenate(ys), np.concatenate(ws))
+            np.concatenate(ys), np.concatenate(ws),
+            np.concatenate(deals).astype(np.int64))
+
+
+def split_by_deal(deal_ids: np.ndarray, val_frac: float, seed: int):
+    """按 deal 分组切分，同一局的状态只能进入一侧。"""
+    uniq = np.unique(deal_ids)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(uniq)
+    n_val = max(1, int(len(uniq) * val_frac)) if len(uniq) > 1 else 0
+    val_deals = set(int(x) for x in uniq[:n_val])
+    is_val = np.fromiter((int(d) in val_deals for d in deal_ids),
+                         dtype=bool, count=len(deal_ids))
+    vi = np.flatnonzero(is_val)
+    ti = np.flatnonzero(~is_val)
+    if len(ti) == 0:
+        raise SystemExit("deal split produced no training samples")
+    return ti, vi, sorted(val_deals)
 
 
 def main() -> None:
@@ -39,16 +62,16 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--out", type=str, default="models/value_v1.pt")
     ap.add_argument("--val", type=float, default=0.05)
+    ap.add_argument("--split-seed", type=int, default=0)
     args = ap.parse_args()
 
-    x, y, w = load_parts(args.data)
+    x, y, w, deal_ids = load_parts(args.data)
     n = len(y)
     print(f"total {n} samples, dim={x.shape[1]}")
-
-    rng = np.random.default_rng(0)
-    idx = rng.permutation(n)
-    n_val = int(n * args.val)
-    val_idx, tr_idx = idx[:n_val], idx[n_val:]
+    tr_idx, val_idx, val_deals = split_by_deal(
+        deal_ids, args.val, args.split_seed)
+    print(f"split by deal: train={len(tr_idx)} val={len(val_idx)} "
+          f"({len(val_deals)} val deals)")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = ValueNet(dim=x.shape[1]).to(device)
@@ -92,8 +115,12 @@ def main() -> None:
               f"val_MAE={mae:.2f}分 val_win_acc={acc:.2%}")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    save(args.out, model.cpu(), {"dim": x.shape[1], "hidden": 256,
-                                 "samples": n, "eps": "see config"})
+    save(args.out, model.cpu(), {
+        "model_type": "value_legacy", "dim": x.shape[1], "hidden": 256,
+        "samples": n, "features": "legacy_v2_no_leak",
+        "rule_hash": DEFAULT_RULES.hash(), "engine_version": ENGINE_VERSION,
+        "split": "deal", "val_deals": val_deals, "split_seed": args.split_seed,
+    })
     print(f"saved {args.out}")
 
 

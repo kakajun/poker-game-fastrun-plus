@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import GreedyMinAgent, M1Agent, M2Agent, QAgent, RandomAgent
+from src.arena.agents import GreedyMinAgent, M1Agent, M2Agent, QAgent
 from src.arena.match import run_duplicate
 from src.fastrun.config import DEFAULT_RULES
 
@@ -35,7 +35,6 @@ def main() -> None:
     run("q vs greedy", mk(), [GreedyMinAgent(), GreedyMinAgent()])
     run("q vs m2", mk(), [M2Agent(cfg, endgame_k=6), M2Agent(cfg, endgame_k=6)])
     run("q vs m1", mk(), [M1Agent(cfg), M1Agent(cfg)])
-    run("q vs random", mk(), [RandomAgent(1), RandomAgent(2)])
     run("m2 vs greedy (ref)", M2Agent(cfg, endgame_k=6),
         [GreedyMinAgent(), GreedyMinAgent()])
 

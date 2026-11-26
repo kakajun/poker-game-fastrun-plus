@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import GreedyMinAgent, M1Agent, RandomAgent
+from src.arena.agents import GreedyMinAgent, M1Agent, M2Agent
 from src.arena.match import run_duplicate
 from src.fastrun.config import DEFAULT_RULES
 
@@ -27,29 +27,25 @@ def main() -> None:
     print("-" * 96)
 
     reports = []
-    reports.append(run_duplicate(M1Agent(cfg), [RandomAgent(1), RandomAgent(2)],
-                                 n_deals=n, cfg=cfg, seed0=args.seed))
-    print(reports[-1])
-
     reports.append(run_duplicate(M1Agent(cfg), [GreedyMinAgent(), GreedyMinAgent()],
                                  n_deals=n, cfg=cfg, seed0=args.seed))
     print(reports[-1])
 
-    reports.append(run_duplicate(GreedyMinAgent(), [RandomAgent(1), RandomAgent(2)],
+    reports.append(run_duplicate(M1Agent(cfg),
+                                 [M2Agent(cfg, endgame_k=6),
+                                  M2Agent(cfg, endgame_k=6)],
                                  n_deals=n, cfg=cfg, seed0=args.seed))
     print(reports[-1])
 
-    reports.append(run_duplicate(RandomAgent(9), [RandomAgent(1), RandomAgent(2)],
+    reports.append(run_duplicate(GreedyMinAgent(), [M1Agent(cfg), M1Agent(cfg)],
                                  n_deals=n, cfg=cfg, seed0=args.seed))
     print(reports[-1])
 
     print("-" * 96)
-    m1_vs_rand = reports[0].win_rate
-    m1_vs_greedy = reports[1].win_rate
-    print(f"GATE M1 vs random  >= 80.0% : {m1_vs_rand:.1%}  "
-          f"{'PASS' if m1_vs_rand >= 0.80 else 'FAIL'}")
+    m1_vs_greedy = reports[0].win_rate
     print(f"GATE M1 vs greedy  >= 55.0% : {m1_vs_greedy:.1%}  "
           f"{'PASS' if m1_vs_greedy >= 0.55 else 'FAIL'}")
+    print("Random is intentionally excluded from v3 acceptance and opponent pool.")
 
 
 if __name__ == "__main__":

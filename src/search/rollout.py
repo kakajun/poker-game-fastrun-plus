@@ -1,10 +1,11 @@
-"""快速 rollout（greedy 策略），用于给 Q(s,a) 生成蒙特卡洛回报。
+"""快速 rollout。
 
-刻意不用 M1（太慢，每步要算拆牌）；greedy 的偏差在"同一状态的不同候选之间"
-是共模的，用来做相对排序足够。
+确定性 rollout 只允许执行一次，不得把重复调用称为 MC；需要随机继续策略时
+显式传入 seed/epsilon，并由数据集记录该 continuation_id。
 """
 
-from typing import List
+import random
+from typing import List, Optional
 
 from ..fastrun import cards as C
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
@@ -21,12 +22,22 @@ def greedy_move(ms: List[Move]) -> Move:
 
 
 def rollout(state: GameState, cfg: RuleConfig = DEFAULT_RULES,
-            max_steps: int = 200) -> GameState:
+            max_steps: int = 200, seed: Optional[int] = None,
+            epsilon: float = 0.0) -> GameState:
+    """epsilon=0 时完全确定；epsilon>0 时每个决策按 seed 独立采样。"""
+    if epsilon < 0.0 or epsilon > 1.0:
+        raise ValueError("epsilon must be in [0, 1]")
+    rng = random.Random(seed)
     st = state
     steps = 0
     while not st.over:
         steps += 1
         if steps > max_steps:
             break
-        st = st.apply(greedy_move(st.legal_moves(cfg)), cfg)
+        ms = st.legal_moves(cfg)
+        if epsilon > 0.0 and rng.random() < epsilon:
+            mv = rng.choice(ms)
+        else:
+            mv = greedy_move(ms)
+        st = st.apply(mv, cfg)
     return st

@@ -53,6 +53,9 @@ class M1Agent(Agent):
     def __init__(self, cfg: RuleConfig = DEFAULT_RULES):
         self.policy = M1Policy(cfg)
 
+    def reset(self) -> None:
+        self.policy.reset()
+
     def act(self, state, moves):
         return self.policy.act(state, moves)
 
@@ -68,6 +71,9 @@ class M2Agent(Agent):
         self.policy = M1Policy(cfg, endgame_cards=endgame_cards,
                                endgame_k=endgame_k, seed=seed,
                                guaranteed_lead=guaranteed_lead)
+
+    def reset(self) -> None:
+        self.policy.reset()
 
     def act(self, state, moves):
         return self.policy.act(state, moves)
@@ -99,15 +105,22 @@ class ValueAgent(Agent):
         if self._model is not None:
             return
         import torch
-        from ..net.model import load
+        from ..net.model import ENGINE_VERSION, load
         from ..net.encode import DIM
         if self.device == "cuda" and not torch.cuda.is_available():
             self.device = "cpu"
-        model, _ = load(self.model_path, map_location=self.device)
+        expected = {"model_type": "value_legacy", "dim": DIM,
+                    "engine_version": ENGINE_VERSION,
+                    "rule_hash": self.cfg.hash()}
+        model, _ = load(self.model_path, map_location=self.device,
+                        expected=expected, require_meta=True)
         model.to(self.device)
         self._torch = torch
         self._model = model
         self._dim = DIM
+
+    def reset(self) -> None:
+        self.policy.reset()
 
     def act(self, state, moves):
         ms = list(state.legal_moves(self.cfg) if moves is None else moves)
@@ -154,14 +167,23 @@ class SearchValueAgent(Agent):
         self.calls = 0
         self._model = None
 
+    def reset(self) -> None:
+        self.calls = 0
+        self.policy.reset()
+
     def _load(self):
         if self._model is not None:
             return
         import torch
-        from ..net.model import load
+        from ..net.model import ENGINE_VERSION, load
+        from ..net.encode import DIM
         if self.device == "cuda" and not torch.cuda.is_available():
             self.device = "cpu"
-        model, _ = load(self.model_path, map_location=self.device)
+        expected = {"model_type": "value_legacy", "dim": DIM,
+                    "engine_version": ENGINE_VERSION,
+                    "rule_hash": self.cfg.hash()}
+        model, _ = load(self.model_path, map_location=self.device,
+                        expected=expected, require_meta=True)
         model.to(self.device)
         self._torch = torch
         self._model = model
@@ -177,7 +199,7 @@ class SearchValueAgent(Agent):
         if len(cands) == 1:
             return cands[0]
 
-        from ..infer.sampler import sample_worlds
+        from ..infer.sampler import SamplingError, sample_worlds
         from ..search.pimc import _rollout_trick
         from ..net.encode import encode
         import numpy as np
@@ -185,8 +207,11 @@ class SearchValueAgent(Agent):
         self._load()
         me = state.current
         self.calls += 1
-        worlds = sample_worlds(state, me, self.k, self.cfg,
-                               seed=self.seed * 104729 + self.calls)
+        try:
+            worlds = sample_worlds(state, me, self.k, self.cfg,
+                                   seed=self.seed * 104729 + self.calls)
+        except SamplingError:
+            return cands[0]
 
         feats = []
         for m in cands:
@@ -210,7 +235,7 @@ class QAgent(Agent):
     def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
                  model_path: str = "models/q_v1.pt",
                  top_k: int = 6, prior: float = 0.0,
-                 device: str = "cuda", guaranteed_lead: bool = True):
+                 device: str = "cuda", guaranteed_lead: bool = False):
         self.cfg = cfg
         self.policy = M1Policy(cfg, guaranteed_lead=guaranteed_lead)
         self.model_path = model_path
@@ -219,14 +244,22 @@ class QAgent(Agent):
         self.device = device
         self._model = None
 
+    def reset(self) -> None:
+        self.policy.reset()
+
     def _load(self):
         if self._model is not None:
             return
         import torch
-        from ..net.model import load
+        from ..net.model import ENGINE_VERSION, load
+        from ..net.encode import DIM, MOVE_DIM
         if self.device == "cuda" and not torch.cuda.is_available():
             self.device = "cpu"
-        model, _ = load(self.model_path, map_location=self.device)
+        expected = {"model_type": "q_legacy", "dim": DIM,
+                    "move_dim": MOVE_DIM, "engine_version": ENGINE_VERSION,
+                    "rule_hash": self.cfg.hash()}
+        model, _ = load(self.model_path, map_location=self.device,
+                        expected=expected, require_meta=True)
         model.to(self.device)
         self._torch = torch
         self._model = model
@@ -255,6 +288,88 @@ class QAgent(Agent):
         if self.prior:
             q = q + self.prior * np.linspace(0.0, -1.0, len(cands))
         return cands[int(np.argmax(q))]
+
+
+class PolicyAgent(Agent):
+    """v3 全动作策略网：对全部合法动作打分，不经过 M1 topK。"""
+
+    name = "policy_v3"
+
+    def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
+                 model_path: str = "models/policy_v3.pt",
+                 device: str = "cuda", win_tie_epsilon: float = 1e-6):
+        self.cfg = cfg
+        self.model_path = model_path
+        self.device = device
+        self.win_tie_epsilon = win_tie_epsilon
+        self._model = None
+        self._torch = None
+
+    def _load(self):
+        if self._model is not None:
+            return
+        import torch
+        from ..net.encode_v3 import (ACTION_VERSION, EVENT_DIM,
+                                     FEATURE_VERSION, HISTORY_STEPS, MOVE_DIM,
+                                     STATE_DIM)
+        from ..net.model import ENGINE_VERSION, load
+        if self.device == "cuda" and not torch.cuda.is_available():
+            self.device = "cpu"
+        expected = {
+            "feature_version": FEATURE_VERSION,
+            "action_version": ACTION_VERSION,
+            "engine_version": ENGINE_VERSION,
+            "state_dim": STATE_DIM,
+            "move_dim": MOVE_DIM,
+            "history_steps": HISTORY_STEPS,
+            "event_dim": EVENT_DIM,
+        }
+        model, _ = load(self.model_path, map_location=self.device,
+                        expected=expected, require_meta=True)
+        model.to(self.device)
+        self._torch = torch
+        self._model = model
+
+    def evaluate(self, state, moves):
+        """返回 (moves, 胜率概率, 净分预测)，供策略与解释层共用。"""
+        ms = list(state.legal_moves(self.cfg) if moves is None else moves)
+        if not ms:
+            return [], np.asarray([]), np.asarray([])
+        if len(ms) == 1:
+            return ms, np.asarray([1.0]), np.asarray([0.0])
+
+        self._load()
+        import numpy as np
+        from ..net.encode_v3 import (encode_history, encode_move_set,
+                                     encode_state)
+        me = state.current
+        sf = encode_state(state, me, self.cfg)
+        hf = encode_history(state, me)
+        mf = encode_move_set(state, ms, self.cfg)
+        with self._torch.no_grad():
+            s = self._torch.from_numpy(sf[None, :]).to(self.device)
+            h = self._torch.from_numpy(hf[None, :, :]).to(self.device)
+            m = self._torch.from_numpy(mf[None, :, :]).to(self.device)
+            win, score = self._model(s, h, m)
+            win = win[0].cpu().numpy()
+            score = score[0].cpu().numpy()
+        return ms, 1.0 / (1.0 + np.exp(-win)), score
+
+    def act(self, state, moves):
+        import numpy as np
+        ms, prob, score = self.evaluate(state, moves)
+        if len(ms) <= 1:
+            return ms[0]
+        best_win = float(prob.max())
+        eligible = np.flatnonzero(prob >= best_win - self.win_tie_epsilon)
+        best = int(eligible[np.argmax(score[eligible])])
+        return ms[best]
+
+    def rank_moves(self, state, moves=None):
+        ms, prob, score = self.evaluate(state, moves)
+        order = sorted(range(len(ms)),
+                       key=lambda i: (-float(prob[i]), -float(score[i])))
+        return [ms[i] for i in order]
 
 
 class SearchAgent(Agent):

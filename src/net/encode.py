@@ -1,10 +1,7 @@
-"""状态特征编码（固定视角 p）。
+"""旧版状态特征编码（固定视角 p，保留用于历史模型复现）。
 
-设计原则:
-  * 全部从 p 的视角，相对座位（下家/上家）而不是绝对座位号，避免位置偏置；
-  * 只喂"规则允许知道"的信息（自己的牌、已出牌、各家张数、过牌证据），
-    绝不喂对手手牌 —— 否则价值网会学到作弊特征，上线即崩；
-  * 维度固定 80，全部归一化到 0~1，推理端可批量。
+v3 新模型请使用 `encode_v3.py`；本模块已移除对手真实 `min_steps` 泄露，
+维度由 80 改为 78。旧 80 维 checkpoint 不再兼容，必须重新训练。
 """
 
 from typing import List, Tuple
@@ -17,7 +14,7 @@ from ..fastrun.rules import MoveType
 from ..fastrun.state import GameState
 from ..eval.decompose import min_steps
 
-DIM = 80
+DIM = 78
 MOVE_DIM = 19
 HAND_SIZE = C.HAND_SIZE     # 16（张数类特征按此归一化，点数类仍按 15 归一化）
 
@@ -91,13 +88,14 @@ def encode(state: GameState, p: int,
 
     f.extend(t / HAND_SIZE for t in state.tricks)      # 62..64
     f.extend(max(-60, min(60, b)) / 60.0 for b in state.bombs)  # 65..67
-    f.extend(min_steps(state.hands[q], cfg) / HAND_SIZE for q in (p, nxt, prv))  # 68..70
+    # 只编码自己的拆牌手数；对手真实手牌信息一律不进入特征。
+    f.append(min_steps(state.hands[p], cfg) / HAND_SIZE)  # 68
 
     own_max = C.max_idx(state.hands[p])
     own_min = C.min_idx(state.hands[p])
-    f.append((own_max + 3) / 15.0 if own_max >= 0 else 0.0)  # 71
-    f.append((own_min + 3) / 15.0 if own_min >= 0 else 0.0)  # 72
-    f.append(1.0 if C.total(state.hands[nxt]) == 1 else 0.0)  # 73 顶大压力
+    f.append((own_max + 3) / 15.0 if own_max >= 0 else 0.0)  # 69
+    f.append((own_min + 3) / 15.0 if own_min >= 0 else 0.0)  # 70
+    f.append(1.0 if C.total(state.hands[nxt]) == 1 else 0.0)  # 71 顶大压力
 
     ev_count = {p: 0, nxt: 0, prv: 0}
     ev_max = {p: 0, nxt: 0, prv: 0}
@@ -111,12 +109,12 @@ def encode(state: GameState, p: int,
         if target.type == MoveType.BOMB:
             ev_bomb[q] = 1
 
-    f.append(min(ev_count[nxt], 8) / 8.0)              # 74
-    f.append(min(ev_count[prv], 8) / 8.0)              # 75
-    f.append(ev_max[nxt] / 15.0)                       # 76
-    f.append(ev_max[prv] / 15.0)                       # 77
-    f.append(float(ev_bomb[nxt]))                      # 78
-    f.append(float(ev_bomb[prv]))                      # 79
+    f.append(min(ev_count[nxt], 8) / 8.0)              # 72
+    f.append(min(ev_count[prv], 8) / 8.0)              # 73
+    f.append(ev_max[nxt] / 15.0)                       # 74
+    f.append(ev_max[prv] / 15.0)                       # 75
+    f.append(float(ev_bomb[nxt]))                      # 76
+    f.append(float(ev_bomb[prv]))                      # 77
 
     arr = np.asarray(f, dtype=np.float32)
     assert arr.shape[0] == DIM, arr.shape

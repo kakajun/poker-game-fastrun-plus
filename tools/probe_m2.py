@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import GreedyMinAgent, M1Agent, M2Agent, RandomAgent
+from src.arena.agents import GreedyMinAgent, M1Agent, M2Agent
 from src.arena.match import run_duplicate
 from src.fastrun.config import DEFAULT_RULES
 
@@ -27,12 +27,6 @@ def main():
     r = run_duplicate(m2, [GreedyMinAgent(), GreedyMinAgent()],
                       n_deals=args.deals, cfg=cfg, seed0=args.seed)
     print(f"m2(cards={args.cards},k={args.k}) vs greedy  {r.win_rate:6.1%} "
-          f"[{r.ci[0]:.1%},{r.ci[1]:.1%}]  score={r.avg_score:+6.2f}  {r.avg_ms:6.1f}ms")
-
-    m2b = M2Agent(cfg, endgame_cards=args.cards, endgame_k=args.k, seed=2)
-    r = run_duplicate(m2b, [RandomAgent(1), RandomAgent(2)],
-                      n_deals=args.deals, cfg=cfg, seed0=args.seed)
-    print(f"m2(cards={args.cards},k={args.k}) vs random  {r.win_rate:6.1%} "
           f"[{r.ci[0]:.1%},{r.ci[1]:.1%}]  score={r.avg_score:+6.2f}  {r.avg_ms:6.1f}ms")
 
     m2c = M2Agent(cfg, endgame_cards=args.cards, endgame_k=args.k, seed=3)

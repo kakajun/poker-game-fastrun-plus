@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import Agent, GreedyMinAgent, RandomAgent
+from src.arena.agents import Agent, GreedyMinAgent
 from src.arena.match import run_duplicate
 from src.eval.control import burn_cost, keep_lead_prob
 from src.eval.decompose import min_steps
@@ -61,15 +61,12 @@ def main():
         def act(self, state, moves):
             return self.fn(state, moves)
 
-    print(f"{'threat_n':<10}{'vs random':>11}{'vs greedy':>11}{'score_g':>9}")
+    print(f"{'threat_n':<10}{'vs greedy':>11}{'score_g':>9}")
     for t in (0, 1, 2, 3):
-        a = Fn(f"t{t}", make_policy(t))
-        r1 = run_duplicate(a, [RandomAgent(1), RandomAgent(2)],
-                           n_deals=args.deals, seed0=13)
         a2 = Fn(f"t{t}", make_policy(t))
         r2 = run_duplicate(a2, [GreedyMinAgent(), GreedyMinAgent()],
                            n_deals=args.deals, seed0=13)
-        print(f"{t:<10}{r1.win_rate:>10.1%}{r2.win_rate:>11.1%}{r2.avg_score:>+9.2f}")
+        print(f"{t:<10}{r2.win_rate:>11.1%}{r2.avg_score:>+9.2f}")
 
 
 if __name__ == "__main__":

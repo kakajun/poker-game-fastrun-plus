@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import Agent, GreedyMinAgent, RandomAgent, SearchAgent
+from src.arena.agents import Agent, GreedyMinAgent, SearchAgent
 from src.arena.match import run_duplicate
 from src.eval.decompose import min_steps
 from src.fastrun import cards as C
@@ -41,7 +41,6 @@ def main():
 
     print(f"search: k={args.k}, deals={args.deals}")
     for label, hero, villains in [
-        ("search vs random", SearchAgent(CFG, k=args.k), [RandomAgent(1), RandomAgent(2)]),
         ("search vs greedy", SearchAgent(CFG, k=args.k), [GreedyMinAgent(), GreedyMinAgent()]),
         ("search vs prog_rank", SearchAgent(CFG, k=args.k), [ProgRankAgent(), ProgRankAgent()]),
         ("prog_rank vs greedy", ProgRankAgent(), [GreedyMinAgent(), GreedyMinAgent()]),

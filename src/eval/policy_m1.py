@@ -7,12 +7,12 @@
   4. 首出时若存在不消耗 2/A/K 的候选，先排除消耗大牌的那些；
   5. 剩下的按 点数最小 -> 出牌张数多 排序。
 
-实测（同牌三座位，600 局，`tools/arena_m1.py`）:
-    greedy_min   vs random 78.3%   vs greedy 33.3%
-    prog_rank    vs random 82.3%   vs greedy 43.3%
-    prog_hold    vs random 83.7%   vs greedy 43.3%   <- 本实现
-  线性加权打分（手数 + 控制概率 + 大牌代价）实测反而只有 66%/40%，
-  原因是它会把 2/A 当成"高控制概率"打出去，属于典型的短视，已废弃。
+对强基线的历史实测（同牌多座位，`tools/arena_m1.py`）:
+    greedy_min   vs greedy 33.3%
+    prog_rank    vs greedy 43.3%
+    prog_hold    vs greedy 43.3%   <- 本实现
+  Random 不作为验收基线。线性加权打分（手数 + 控制概率 + 大牌代价）已废弃，
+  原因是它会把 2/A 当成"高控制概率"打出去，属于典型短视。
 """
 
 from typing import List, Optional
@@ -39,6 +39,9 @@ class M1Policy:
         self._calls = 0
         self.guaranteed_lead = guaranteed_lead
 
+    def reset(self) -> None:
+        self._calls = 0
+
     # ------------------------------------------------------------------
 
     def _endgame_move(self, state: GameState,
@@ -47,11 +50,16 @@ class M1Policy:
             return None
         if sum(state.remaining_cards()) > self.endgame_cards:
             return None
-        from ..infer.sampler import sample_worlds
+        from ..infer.sampler import SamplingError, sample_worlds
         from ..search.endgame import solve_worlds
         self._calls += 1
-        worlds = sample_worlds(state, state.current, self.endgame_k,
-                               self.cfg, seed=self.seed * 7919 + self._calls)
+        try:
+            worlds = sample_worlds(
+                state, state.current, self.endgame_k, self.cfg,
+                seed=self.seed * 7919 + self._calls)
+        except SamplingError:
+            # 证据约束过紧时退回普通 M1，而不是偷偷使用伪一致世界。
+            return None
         mv = solve_worlds(state, worlds, self.cfg)
         return mv if mv in moves else None
 
@@ -91,7 +99,7 @@ class M1Policy:
                                               burn_cost(m), -m.max_rank))
 
         # 确定性保权（M2）: 证据/已出牌能证明对手管不起、且不烧大牌时优先兑现。
-        # 实测: 对随机 +3.4pp，对贪心持平；概率型保权（>0.8）反而 -10pp。
+        # 历史尝试中概率型保权（>0.8）明显退化，因此只保留可证明的 >=1.0。
         if self.guaranteed_lead:
             sure = [m for m in pool
                     if burn_cost(m) == 0.0

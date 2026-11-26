@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.arena.agents import Agent, GreedyMinAgent, RandomAgent
+from src.arena.agents import Agent, GreedyMinAgent
 from src.arena.match import run_duplicate
 from src.eval.control import burn_cost, keep_lead_prob
 from src.eval.decompose import min_steps
@@ -142,14 +142,11 @@ VARIANTS = [
 
 def main():
     n = 60
-    print(f"{'agent':<12}{'vs random':>11}{'vs greedy':>11}{'score_r':>9}{'score_g':>9}")
+    print(f"{'agent':<12}{'vs greedy':>11}{'score_g':>9}")
     for name, fn in VARIANTS:
-        a = FnAgent(name, fn)
-        r1 = run_duplicate(a, [RandomAgent(1), RandomAgent(2)], n_deals=n, seed0=5)
         a2 = FnAgent(name, fn)
         r2 = run_duplicate(a2, [GreedyMinAgent(), GreedyMinAgent()], n_deals=n, seed0=5)
-        print(f"{name:<12}{r1.win_rate:>10.1%}{r2.win_rate:>11.1%}"
-              f"{r1.avg_score:>+9.2f}{r2.avg_score:>+9.2f}")
+        print(f"{name:<12}{r2.win_rate:>11.1%}{r2.avg_score:>+9.2f}")
 
     # 变体之间互相对打
     print("\nhead-to-head (row agent vs column agents, 3 座位轮转):")

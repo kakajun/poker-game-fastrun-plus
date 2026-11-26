@@ -1,0 +1,32 @@
+{
+  "model_type": "policy_v3",
+  "feature_version": "v3",
+  "action_version": "v3",
+  "engine_version": "fastrun-v3",
+  "state_dim": 92,
+  "move_dim": 22,
+  "history_steps": 128,
+  "event_dim": 8,
+  "history_mode": "flatten",
+  "hidden": 32,
+  "rule_hash": "e036e2904486",
+  "samples": 6,
+  "val_samples": 12,
+  "train_deals": 3,
+  "val_deals": 6,
+  "seed": 1,
+  "seeds": [
+    1
+  ],
+  "loss": "listwise",
+  "win_temp": 0.2,
+  "score_temp": 0.15,
+  "aux_weight": 0.1,
+  "val": {
+    "loss": 3.7846521536509194,
+    "regret_win": 0.3333333333333333,
+    "regret_score": 0.3305555582046509,
+    "pairwise_acc": 0.3700402530189764,
+    "n": 12
+  }
+}
