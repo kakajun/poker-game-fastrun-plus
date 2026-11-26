@@ -15,6 +15,9 @@ class ObsEncoder:
     - [32:42]: Last Play Type (One-hot)
     """
     
+    # 每人起手 16 张（48 张牌 / 3 人）
+    HAND_SIZE = 16
+
     def __init__(self):
         # 15(手牌) + 2(对手张数) + 15(上家出牌) + 10(牌型) + 15(已出牌统计) + 3(额外特征) = 60
         self.shape = (60,)
@@ -31,12 +34,12 @@ class ObsEncoder:
             if 0 <= idx < 15:
                 my_hand[idx] += 1.0
         
-        # 2. 其他两家剩余牌数 (2维, 归一化 / 15)
+        # 2. 其他两家剩余牌数 (2维, 归一化 / 16)
         others_count = []
         for i in range(1, 3):
             other_idx = (player_idx + i) % 3
             count = len(game.hands[other_idx])
-            others_count.append(count / 15.0)
+            others_count.append(count / self.HAND_SIZE)
         others_vec = np.array(others_count, dtype=np.float32)
         
         # 3. 当前桌面牌 (Last Play)

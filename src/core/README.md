@@ -5,7 +5,7 @@
 ## 模块说明
 
 *   **card.py**: 定义扑克牌 (`Card`)、花色 (`Suit`)、点数 (`Rank`)。
-*   **deck.py**: 定义牌堆 (`Deck`)，负责生成45张牌、洗牌、发牌。
+*   **deck.py**: 定义牌堆 (`Deck`)，负责生成48张牌、洗牌、发牌（每人16张）。
 *   **hand_type.py**: 定义牌型枚举 (`HandType`) 和出牌对象 (`Play`)。
 *   **evaluator.py**: 牌型评估器 (`HandEvaluator`)，负责识别牌型、比较牌力 (`can_beat`)。
 *   **action_generator.py**: 动作生成器 (`ActionGenerator`)，负责生成所有合法出牌动作。

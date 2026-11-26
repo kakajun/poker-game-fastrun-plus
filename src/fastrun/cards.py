@@ -1,4 +1,4 @@
-"""45 张跑得快牌堆的紧凑表示。
+"""48 张跑得快牌堆的紧凑表示。
 
 花色无关，因此一张"牌"退化为点数。整手牌用 13 个 4bit 计数打包进一个 int:
     idx = rank - 3          (0..12 -> 3..15, 15 表示 2)
@@ -17,11 +17,14 @@ RANK_MIN = 3
 RANK_MAX = 15          # 15 == 2
 NIBBLE = 4
 
-# 3..Q 各 4 张, K 3 张, A 1 张, 2 1 张
-RANK_COUNTS: Tuple[int, ...] = (4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 1, 1)
-DECK_SIZE = sum(RANK_COUNTS)          # 45
+# 3..Q 各 4 张, K 4 张, A 3 张, 2 1 张 = 48 张
+RANK_COUNTS: Tuple[int, ...] = (4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 1)
+DECK_SIZE = sum(RANK_COUNTS)          # 48
 FULL_DECK = sum(c << (NIBBLE * i) for i, c in enumerate(RANK_COUNTS))
 MAX_HAND_IDX = 11                      # A -> 顺子/连对/飞机不含 2
+
+NUM_PLAYERS = 3
+HAND_SIZE = DECK_SIZE // NUM_PLAYERS  # 每人 16 张
 
 
 def idx_of_rank(rank: int) -> int:
@@ -120,7 +123,7 @@ def card_ids(hand: int) -> List[int]:
 
 
 def deck_list() -> List[int]:
-    """45 张牌按点数展开（每个元素是 idx）。"""
+    """48 张牌按点数展开（每个元素是 idx）。"""
     out: List[int] = []
     for i, c in enumerate(RANK_COUNTS):
         out.extend([i] * c)

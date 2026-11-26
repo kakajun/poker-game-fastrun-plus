@@ -102,7 +102,7 @@ class TestApiFlow(unittest.TestCase):
         dto = s.to_dto()
         ids = [c.id for c in dto.hands[0]]
         self.assertEqual(packed_from_card_ids(ids), hand)
-        self.assertEqual(len(ids), 15)
+        self.assertEqual(len(ids), 16)
 
     def test_app_imports(self):
         from src.api import app as api_app

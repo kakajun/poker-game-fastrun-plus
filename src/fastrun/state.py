@@ -34,12 +34,13 @@ class GameState:
         deck = C.deck_list()
         rng.shuffle(deck)
         hands = []
-        for p in range(3):
+        for p in range(C.NUM_PLAYERS):
             cnt = [0] * C.NUM_RANKS
-            for idx in deck[p * 15:(p + 1) * 15]:
+            base = p * C.HAND_SIZE
+            for idx in deck[base:base + C.HAND_SIZE]:
                 cnt[idx] += 1
             hands.append(C.make(cnt))
-        cur = rng.randrange(3)
+        cur = rng.randrange(C.NUM_PLAYERS)
         return cls(hands=tuple(hands), current=cur, last_player=cur)
 
     @classmethod

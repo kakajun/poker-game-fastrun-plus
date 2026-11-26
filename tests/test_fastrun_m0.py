@@ -22,13 +22,14 @@ H = C.parse
 
 class TestCards(unittest.TestCase):
     def test_deck(self):
-        self.assertEqual(C.DECK_SIZE, 45)
-        self.assertEqual(C.total(C.FULL_DECK), 45)
-        self.assertEqual(C.RANK_COUNTS, (4,) * 10 + (3, 1, 1))
+        self.assertEqual(C.DECK_SIZE, 48)
+        self.assertEqual(C.total(C.FULL_DECK), 48)
+        self.assertEqual(C.HAND_SIZE, 16)
+        self.assertEqual(C.RANK_COUNTS, (4,) * 11 + (3, 1))
 
     def test_roundtrip(self):
         ids = C.card_ids(C.FULL_DECK)
-        self.assertEqual(len(ids), 45)
+        self.assertEqual(len(ids), 48)
         self.assertEqual(C.hand_from_card_ids(ids), C.FULL_DECK)
         self.assertEqual(C.hand_from_card_ids([44]), H("14*1"))
         self.assertEqual(C.hand_from_card_ids([48]), H("15*1"))
@@ -182,7 +183,7 @@ class TestRandomGames(unittest.TestCase):
                                  C.DECK_SIZE)
             self.assertIn(st.winner, (0, 1, 2))
             self.assertEqual(sum(st.scores), 0)
-            self.assertGreaterEqual(min(st.scores), -45 - 10 - 60 * 2)
+            self.assertGreaterEqual(min(st.scores), -C.DECK_SIZE - 10 - 60 * 2)
 
 
 if __name__ == "__main__":

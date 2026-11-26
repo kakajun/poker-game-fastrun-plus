@@ -45,8 +45,8 @@ class SpringChallengeEvaluator:
         # 大单张 2
         hand.append(Card(Rank.TWO))
         
-        # 确保正好15张
-        while len(hand) < 15:
+        # 确保正好16张
+        while len(hand) < 16:
             # 补点大牌
             hand.append(Card(Rank.ACE))
             

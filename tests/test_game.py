@@ -14,9 +14,9 @@ def test_game_basic():
 
     # Check hands
     assert len(game.hands) == 3
-    assert len(game.hands[0]) == 15
-    assert len(game.hands[1]) == 15
-    assert len(game.hands[2]) == 15
+    assert len(game.hands[0]) == 16
+    assert len(game.hands[1]) == 16
+    assert len(game.hands[2]) == 16
 
     # Check Random Start Player
     start_player = game.current_player

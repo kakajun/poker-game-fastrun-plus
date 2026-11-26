@@ -19,6 +19,7 @@ from ..eval.decompose import min_steps
 
 DIM = 80
 MOVE_DIM = 19
+HAND_SIZE = C.HAND_SIZE     # 16（张数类特征按此归一化，点数类仍按 15 归一化）
 
 _TYPES = list(MoveType)
 
@@ -37,7 +38,7 @@ def encode_move(state: GameState, move, cfg: RuleConfig = DEFAULT_RULES) -> np.n
         f.append(1.0 if move.type == t else 0.0)          # 11
     f.append(min(move.length, 12) / 12.0)                 # 1
     f.append(move.max_rank / 15.0)                        # 1
-    f.append(C.total(move.cards) / 15.0)                  # 1
+    f.append(C.total(move.cards) / HAND_SIZE)             # 1
     f.append(1.0 if move.type == MoveType.BOMB else 0.0)  # 1
 
     hand = state.hand()
@@ -46,7 +47,7 @@ def encode_move(state: GameState, move, cfg: RuleConfig = DEFAULT_RULES) -> np.n
     f.append(min(burn_cost(move), 20.0) / 10.0)           # 1
     f.append(max(-2.0, min(5.0, before - after)) / 5.0)   # 1
     f.append(keep_lead_prob(state, state.current, move, cfg))  # 1
-    f.append(min(after, 15) / 15.0)                       # 1
+    f.append(min(after, HAND_SIZE) / HAND_SIZE)           # 1
 
     arr = np.asarray(f, dtype=np.float32)
     assert arr.shape[0] == MOVE_DIM, arr.shape
@@ -67,8 +68,8 @@ def encode(state: GameState, p: int,
 
     nxt = (p + 1) % 3
     prv = (p + 2) % 3
-    f.append(C.total(state.hands[nxt]) / 15.0)        # 39
-    f.append(C.total(state.hands[prv]) / 15.0)        # 40
+    f.append(C.total(state.hands[nxt]) / HAND_SIZE)   # 39
+    f.append(C.total(state.hands[prv]) / HAND_SIZE)   # 40
 
     for q in (p, nxt, prv):                            # 41..43
         f.append(1.0 if state.current == q else 0.0)
@@ -88,9 +89,9 @@ def encode(state: GameState, p: int,
         for q in (p, nxt, prv):                        # 59..61
             f.append(1.0 if state.last_player == q else 0.0)
 
-    f.extend(t / 15.0 for t in state.tricks)           # 62..64
+    f.extend(t / HAND_SIZE for t in state.tricks)      # 62..64
     f.extend(max(-60, min(60, b)) / 60.0 for b in state.bombs)  # 65..67
-    f.extend(min_steps(state.hands[q], cfg) / 15.0 for q in (p, nxt, prv))  # 68..70
+    f.extend(min_steps(state.hands[q], cfg) / HAND_SIZE for q in (p, nxt, prv))  # 68..70
 
     own_max = C.max_idx(state.hands[p])
     own_min = C.min_idx(state.hands[p])
