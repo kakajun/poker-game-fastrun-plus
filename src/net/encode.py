@@ -18,8 +18,39 @@ from ..fastrun.state import GameState
 from ..eval.decompose import min_steps
 
 DIM = 80
+MOVE_DIM = 19
 
 _TYPES = list(MoveType)
+
+
+def encode_move(state: GameState, move, cfg: RuleConfig = DEFAULT_RULES) -> np.ndarray:
+    """动作特征（与状态特征拼接后送 Q 头）。
+
+    关键几维是"这手牌让局面变好多少"（progress）、"打出去的大牌多贵"（burn）、
+    "打完还能不能继续首出"（keep_lead_prob）——这三条是 M1/M2 实测出来的有效成分。
+    """
+    from ..eval.control import burn_cost, keep_lead_prob
+    from ..eval.decompose import min_steps
+
+    f: List[float] = []
+    for t in _TYPES:
+        f.append(1.0 if move.type == t else 0.0)          # 11
+    f.append(min(move.length, 12) / 12.0)                 # 1
+    f.append(move.max_rank / 15.0)                        # 1
+    f.append(C.total(move.cards) / 15.0)                  # 1
+    f.append(1.0 if move.type == MoveType.BOMB else 0.0)  # 1
+
+    hand = state.hand()
+    before = min_steps(hand, cfg)
+    after = min_steps(hand - move.cards, cfg)
+    f.append(min(burn_cost(move), 20.0) / 10.0)           # 1
+    f.append(max(-2.0, min(5.0, before - after)) / 5.0)   # 1
+    f.append(keep_lead_prob(state, state.current, move, cfg))  # 1
+    f.append(min(after, 15) / 15.0)                       # 1
+
+    arr = np.asarray(f, dtype=np.float32)
+    assert arr.shape[0] == MOVE_DIM, arr.shape
+    return arr
 
 
 def encode(state: GameState, p: int,

@@ -202,6 +202,61 @@ class SearchValueAgent(Agent):
         return cands[int(np.argmax(v))]
 
 
+class QAgent(Agent):
+    """Q(s,a): 在 M1 候选上直接打分取最优。"""
+
+    name = "q"
+
+    def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
+                 model_path: str = "models/q_v1.pt",
+                 top_k: int = 6, prior: float = 0.0,
+                 device: str = "cuda", guaranteed_lead: bool = True):
+        self.cfg = cfg
+        self.policy = M1Policy(cfg, guaranteed_lead=guaranteed_lead)
+        self.model_path = model_path
+        self.top_k = top_k
+        self.prior = prior
+        self.device = device
+        self._model = None
+
+    def _load(self):
+        if self._model is not None:
+            return
+        import torch
+        from ..net.model import load
+        if self.device == "cuda" and not torch.cuda.is_available():
+            self.device = "cpu"
+        model, _ = load(self.model_path, map_location=self.device)
+        model.to(self.device)
+        self._torch = torch
+        self._model = model
+
+    def act(self, state, moves):
+        ms = list(state.legal_moves(self.cfg) if moves is None else moves)
+        if len(ms) <= 1:
+            return ms[0]
+        ranked = self.policy.rank_moves(state, ms)
+        if ranked[0].is_pass:
+            return ranked[0]
+        cands = ranked[:self.top_k]
+        if len(cands) == 1:
+            return cands[0]
+
+        self._load()
+        import numpy as np
+        from ..net.encode import encode, encode_move
+        me = state.current
+        sf = encode(state, me, self.cfg)
+        mf = np.stack([encode_move(state, m, self.cfg) for m in cands])
+        with self._torch.no_grad():
+            s = self._torch.from_numpy(sf[None, :]).to(self.device)
+            m = self._torch.from_numpy(mf[None, :, :]).to(self.device)
+            q = self._model(s, m)[0].cpu().numpy()
+        if self.prior:
+            q = q + self.prior * np.linspace(0.0, -1.0, len(cands))
+        return cands[int(np.argmax(q))]
+
+
 class SearchAgent(Agent):
     """PIMC 雏形（M2/M3 的先行版）：K 个确定性化 + 只搜一轮。"""
 
