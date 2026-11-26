@@ -15,7 +15,7 @@ from src.fastrun.config import DEFAULT_RULES
 from src.fastrun.rules import PASS, classify
 from src.fastrun.state import GameState
 from src.net.encode import DIM as LEGACY_DIM, encode as encode_legacy
-from src.net.encode_v3 import (EVENT_DIM, HISTORY_STEPS, STATE_DIM,
+from src.net.encode_v3 import (EVENT_DIM, HISTORY_STEPS, MOVE_DIM, STATE_DIM,
                                encode_history, encode_state)
 from src.search.endgame import solve_values, solve_with_status
 from src.search.rollout import rollout
@@ -131,7 +131,7 @@ class TestPolicyCheckpoint(unittest.TestCase):
         model = PolicyNetV3(hidden=32)
         s = torch.zeros(2, STATE_DIM)
         h = torch.zeros(2, HISTORY_STEPS, EVENT_DIM)
-        m = torch.zeros(2, 5, 22)
+        m = torch.zeros(2, 5, MOVE_DIM)
         win, score = model(s, h, m)
         self.assertEqual(tuple(win.shape), (2, 5))
         self.assertEqual(tuple(score.shape), (2, 5))
@@ -139,8 +139,9 @@ class TestPolicyCheckpoint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "p.pt")
             save(path, model, {"hidden": 32})
-            _, meta = load(path, expected={"feature_version": "v3"},
-                           require_meta=True)
+            _, meta = load(path, expected={
+                "feature_version": "v4", "objective_version": "v1"},
+                require_meta=True)
             self.assertEqual(meta["state_dim"], STATE_DIM)
             with self.assertRaises(CheckpointMismatch):
                 load(path, expected={"feature_version": "v2"},
@@ -170,8 +171,12 @@ class TestDataSchema(unittest.TestCase):
                                  (HISTORY_STEPS, EVENT_DIM))
                 self.assertEqual(len(d["win"]), len(d["actions"]))
                 self.assertEqual(len(d["split"]), len(states))
-                self.assertEqual(str(d["feature_version"]), "v3")
+                for key in ("base_score", "spring_score", "bomb_score",
+                            "spring_opponents", "full_spring"):
+                    self.assertEqual(len(d[key]), len(d["actions"]))
+                self.assertEqual(str(d["feature_version"]), "v4")
                 self.assertEqual(int(d["state_dim"]), STATE_DIM)
+                self.assertEqual(int(d["move_dim"]), MOVE_DIM)
 
 
 if __name__ == "__main__":

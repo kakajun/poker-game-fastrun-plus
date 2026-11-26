@@ -15,17 +15,18 @@ import numpy as np
 
 from ..eval.control import burn_cost, keep_lead_prob
 from ..eval.decompose import min_steps
+from ..eval.score_ev import zero_play_opponents
 from ..fastrun import cards as C
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
 from ..fastrun.rules import Move, MoveType
 from ..fastrun.state import GameState
 
-FEATURE_VERSION = "v3"
-ACTION_VERSION = "v3"
+FEATURE_VERSION = "v4"
+ACTION_VERSION = "v4"
 HISTORY_STEPS = 128
 EVENT_DIM = 8
-MOVE_DIM = 22
-STATE_DIM = 92
+MOVE_DIM = 28
+STATE_DIM = 97
 _TYPES = list(MoveType)
 
 
@@ -63,8 +64,10 @@ def encode_state(state: GameState, p: int,
         for q in (p, nxt, prv):                        # 59..61
             f.append(1.0 if state.last_player == q else 0.0)
 
-    f.extend(t / C.HAND_SIZE for t in state.tricks)    # 62..64
-    f.extend(max(-60, min(60, b)) / 60.0 for b in state.bombs)  # 65..67
+    # tricks/bombs 统一按 p/nxt/prv 相对座位编码，避免绝对座位偏置。
+    f.extend(state.tricks[q] / C.HAND_SIZE for q in (p, nxt, prv))  # 62..64
+    f.extend(max(-60, min(60, state.bombs[q])) / 60.0
+             for q in (p, nxt, prv))                    # 65..67
 
     # 自己的拆牌手数合法；对手信息只能来自公开事件，不再填对手真实 min_steps。
     f.append(min_steps(state.hands[p], cfg) / C.HAND_SIZE)  # 68
@@ -104,6 +107,15 @@ def encode_state(state: GameState, p: int,
     f.extend(c / total_actions for c in type_counts)    # 78..88
     f.extend(actor_counts[q] / total_actions for q in (p, nxt, prv))  # 89..91
 
+    # v4：春天存活、可兑现基础分和控制点，均为公开信息。
+    zero_opp = zero_play_opponents(state.tricks, p)
+    opp_cards = sum(C.total(state.hands[q]) for q in (nxt, prv))
+    f.append(zero_opp / 2.0)                           # 92
+    f.append(1.0 if zero_opp == 2 else 0.0)            # 93
+    f.append(opp_cards / (2.0 * C.HAND_SIZE))          # 94
+    f.append(1.0 if C.total(state.hands[prv]) == 1 else 0.0)  # 95
+    f.append(min(60, zero_opp * cfg.spring_score) / 60.0)  # 96
+
     arr = np.asarray(f, dtype=np.float32)
     assert arr.shape[0] == STATE_DIM, arr.shape
     return arr
@@ -122,8 +134,11 @@ def encode_move(state: GameState, move: Move,
     f.append(1.0 if move.is_pass else 0.0)             # 1
 
     hand = state.hand()
+    p = state.current
     if move.is_pass:
         burn = progress = after_steps = keep = 0.0
+        bomb_delta = 0.0
+        finish = False
     else:
         before = min_steps(hand, cfg)
         after = min_steps(hand - move.cards, cfg)
@@ -131,11 +146,27 @@ def encode_move(state: GameState, move: Move,
         progress = max(-2.0, min(5.0, before - after)) / 5.0
         after_steps = min(after, C.HAND_SIZE) / C.HAND_SIZE
         keep = keep_lead_prob(state, state.current, move, cfg)
+        child = state.apply(move, cfg)
+        bomb_delta = float(child.bombs[p] - state.bombs[p])
+        finish = (hand - move.cards) == 0
     f.extend([burn, progress, keep, after_steps])      # 4
-    f.append(1.0 if (not move.is_pass and move.cards == hand) else 0.0)  # 1
+    f.append(1.0 if finish else 0.0)                   # 1
 
     nxt = (state.current + 1) % 3
+    prv = (state.current + 2) % 3
     f.append(1.0 if C.total(state.hands[nxt]) == 1 else 0.0)  # 1
+
+    # v4：炸弹立即分差、春天存活和兑现概率。
+    zero_opp = zero_play_opponents(state.tricks, p)
+    spring_finish = (zero_opp * cfg.spring_score) if finish else 0
+    spring_potential = zero_opp * cfg.spring_score * keep
+    opp_cards = sum(C.total(state.hands[q]) for q in (nxt, prv))
+    f.append(max(-30.0, min(30.0, bomb_delta)) / 30.0)  # 1
+    f.append(zero_opp / 2.0)                           # 1
+    f.append(min(60, spring_finish) / 60.0)            # 1
+    f.append(min(60.0, spring_potential) / 60.0)       # 1
+    f.append(1.0 if (zero_opp > 0 and keep >= 0.8) else 0.0)  # 1
+    f.append(opp_cards / (2.0 * C.HAND_SIZE))          # 1
 
     arr = np.asarray(f, dtype=np.float32)
     assert arr.shape[0] == MOVE_DIM, arr.shape

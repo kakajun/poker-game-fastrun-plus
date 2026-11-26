@@ -9,6 +9,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from ..eval.objective import OBJECTIVE_VERSION
 from .encode import DIM
 from .encode_v3 import (ACTION_VERSION, EVENT_DIM, FEATURE_VERSION,
                         HISTORY_STEPS, MOVE_DIM, STATE_DIM)
@@ -128,6 +129,7 @@ def save(path: str, model, meta: dict) -> None:
         payload.setdefault("history_steps", model.history_steps)
         payload.setdefault("event_dim", model.event_dim)
         payload.setdefault("history_mode", model.history_mode)
+        payload.setdefault("objective_version", OBJECTIVE_VERSION)
     torch.save({"state_dict": model.state_dict(), "meta": payload}, path)
 
 

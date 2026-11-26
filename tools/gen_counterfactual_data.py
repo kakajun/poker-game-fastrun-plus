@@ -1,4 +1,4 @@
-"""生成 v3 反事实教师数据。
+"""生成 v4 反事实教师数据。
 
 每个样本:
   * 只编码当前玩家的合法信息集；
@@ -30,6 +30,7 @@ from src.arena.agents import (GreedyMinAgent, M1Agent, M2Agent,
                               PolicyAgent)
 from src.fastrun.config import DEFAULT_RULES
 from src.fastrun.state import GameState
+from src.eval.score_ev import score_breakdowns
 from src.infer.sampler import sample_worlds_report
 from src.net.encode_v3 import (ACTION_VERSION, FEATURE_VERSION,
                                HISTORY_STEPS, MOVE_DIM, STATE_DIM,
@@ -39,7 +40,7 @@ from src.net.versions import ENGINE_VERSION
 CFG = DEFAULT_RULES
 OPPONENTS = ("greedy", "m1", "m2", "net")
 CONTINUATIONS = ("m1", "m2", "net")
-POLICY_VERSION = "counterfactual-v1"
+POLICY_VERSION = "counterfactual-v2"
 _NET_CACHE = {}
 
 
@@ -59,7 +60,7 @@ def _agent(name: str, seed: int, model_path: str):
 
 def _playout(state: GameState, me: int, continuation: str, villain: str,
              seed: int, model_path: str):
-    """从 state 打到终局；返回 (win, score) 或 None（未终止）。"""
+    """从 state 打到终局；返回 (win, score, ScoreBreakdown) 或 None。"""
     hero = _agent(continuation, seed, model_path)
     v1 = _agent(villain, seed + 1, model_path)
     v2 = _agent(villain, seed + 2, model_path)
@@ -74,7 +75,10 @@ def _playout(state: GameState, me: int, continuation: str, villain: str,
     st = state
     for _ in range(500):
         if st.over:
-            return (1.0 if st.winner == me else 0.0), float(st.scores[me])
+            bd = score_breakdowns(
+                st.hands, st.tricks, st.bombs, st.winner, CFG)[me]
+            return ((1.0 if st.winner == me else 0.0),
+                    float(st.scores[me]), bd)
         p = st.current
         mv = agents[p].act(st, st.legal_moves(CFG))
         st = st.apply(mv, CFG)
@@ -108,7 +112,9 @@ def _gen_range(task):
     rng = random.Random(seed_base * 131 + wid)
     behavior_agent = _agent(behavior, seed_base + wid, model_path)
     keys = ("state", "history", "actions", "win", "score", "win_se",
-            "score_se", "baseline_idx", "deal_id", "game_id", "opponent_idx",
+            "score_se", "base_score", "spring_score", "bomb_score",
+            "spring_opponents", "full_spring",
+            "baseline_idx", "deal_id", "game_id", "opponent_idx",
             "continuation_idx", "behavior_idx", "split", "world_seed")
     buffers = {s: {k: [] for k in keys} for s in (0, 1, 2)}
     offsets = {s: [0] for s in (0, 1, 2)}
@@ -136,6 +142,15 @@ def _gen_range(task):
                 score=np.concatenate(b["score"]).astype(np.float32),
                 win_se=np.concatenate(b["win_se"]).astype(np.float32),
                 score_se=np.concatenate(b["score_se"]).astype(np.float32),
+                base_score=np.concatenate(b["base_score"]).astype(np.float32),
+                spring_score=np.concatenate(
+                    b["spring_score"]).astype(np.float32),
+                bomb_score=np.concatenate(b["bomb_score"]).astype(np.float32),
+                spring_opponents=np.concatenate(
+                    b["spring_opponents"]).astype(np.float32),
+                full_spring=np.concatenate(
+                    b["full_spring"]).astype(np.float32),
+                label_scale=np.asarray(30.0, dtype=np.float32),
                 baseline_idx=np.asarray(b["baseline_idx"], dtype=np.int32),
                 deal_id=np.asarray(b["deal_id"], dtype=np.int64),
                 game_id=np.asarray(b["game_id"], dtype=np.int64),
@@ -191,6 +206,11 @@ def _gen_range(task):
                 failures += report.failures
                 win_rows = [[] for _ in ms]
                 score_rows = [[] for _ in ms]
+                base_rows = [[] for _ in ms]
+                spring_rows = [[] for _ in ms]
+                bomb_rows = [[] for _ in ms]
+                spring_opp_rows = [[] for _ in ms]
+                full_rows = [[] for _ in ms]
                 # 任一世界不满足 Pass 证据时不生成伪精确教师标签。
                 bad = report.failures > 0
                 for w_i, world in enumerate(report.worlds):
@@ -203,7 +223,16 @@ def _gen_range(task):
                             bad = True
                             break
                         win_rows[a_i].append(out[0])
-                        score_rows[a_i].append(np.clip(out[1], -90, 90) / 30.0)
+                        score_rows[a_i].append(
+                            np.clip(out[1], -90, 90) / 30.0)
+                        bd = out[2]
+                        base_rows[a_i].append(
+                            np.clip(bd.base, -90, 90) / 30.0)
+                        spring_rows[a_i].append(bd.spring / 30.0)
+                        bomb_rows[a_i].append(bd.bomb / 30.0)
+                        spring_opp_rows[a_i].append(
+                            bd.spring_opponents / 2.0)
+                        full_rows[a_i].append(1.0 if bd.full_spring else 0.0)
                     if bad:
                         break
                 if not bad:
@@ -211,6 +240,17 @@ def _gen_range(task):
                     scores = np.asarray(score_rows, dtype=np.float32)
                     wm, wse = zip(*[_mean_se(row) for row in wins])
                     sm, sse = zip(*[_mean_se(row) for row in scores])
+                    bm = np.asarray([np.mean(row)
+                                     for row in base_rows], dtype=np.float32)
+                    spm = np.asarray([np.mean(row)
+                                      for row in spring_rows], dtype=np.float32)
+                    bom = np.asarray([np.mean(row)
+                                      for row in bomb_rows], dtype=np.float32)
+                    som = np.asarray([np.mean(row)
+                                      for row in spring_opp_rows],
+                                     dtype=np.float32)
+                    fsm = np.asarray([np.mean(row)
+                                      for row in full_rows], dtype=np.float32)
                     b = buffers[split]
                     b["state"].append(encode_state(st, me, CFG))
                     b["history"].append(encode_history(st, me))
@@ -220,6 +260,11 @@ def _gen_range(task):
                     b["score"].append(np.asarray(sm, dtype=np.float32))
                     b["win_se"].append(np.asarray(wse, dtype=np.float32))
                     b["score_se"].append(np.asarray(sse, dtype=np.float32))
+                    b["base_score"].append(bm)
+                    b["spring_score"].append(spm)
+                    b["bomb_score"].append(bom)
+                    b["spring_opponents"].append(som)
+                    b["full_spring"].append(fsm)
                     b["baseline_idx"].append(baseline_idx)
                     b["deal_id"].append(deal_id)
                     b["game_id"].append(start + i)
@@ -251,8 +296,8 @@ def main() -> None:
     ap.add_argument("--behavior", choices=CONTINUATIONS, default="m2")
     ap.add_argument("--continuation", choices=CONTINUATIONS, default="m2")
     ap.add_argument("--opponents", type=str, default="greedy,m1,m2")
-    ap.add_argument("--model", type=str, default="models/policy_v3.pt")
-    ap.add_argument("--out", type=str, default="data/cf_v3.npz")
+    ap.add_argument("--model", type=str, default="models/policy_v4.pt")
+    ap.add_argument("--out", type=str, default="data/cf_v4.npz")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=100)
     ap.add_argument("--split-seed", type=int, default=20261126)
@@ -317,6 +362,9 @@ def main() -> None:
                   "split_seed": args.split_seed,
                   "val_frac": args.val_frac, "test_frac": args.test_frac},
         "action_layout": "ragged: actions[action_offsets[i]:action_offsets[i+1]]",
+        "labels": ["win", "score", "base_score", "spring_score",
+                   "bomb_score", "spring_opponents", "full_spring"],
+        "label_scale": 30.0,
         "file_layout": "{prefix}.{train|val|test}.w{worker}.part{n}.npz",
     }
     with open(prefix + ".json", "w", encoding="utf-8") as f:

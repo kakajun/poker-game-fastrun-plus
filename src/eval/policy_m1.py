@@ -15,14 +15,16 @@
   原因是它会把 2/A 当成"高控制概率"打出去，属于典型短视。
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ..fastrun import cards as C
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
-from ..fastrun.rules import Move
+from ..fastrun.rules import Move, MoveType
 from ..fastrun.state import GameState
 from .control import burn_cost, keep_lead_prob
 from .decompose import min_steps
+from .objective import ObjectiveConfig
+from .score_ev import zero_play_opponents
 
 # 残局兑现的保权阈值（实测 0.7~0.8 最好，0.9 开始过于保守）
 SAFE_P = 0.8
@@ -31,13 +33,17 @@ SAFE_P = 0.8
 class M1Policy:
     def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
                  endgame_cards: int = 0, endgame_k: int = 8, seed: int = 0,
-                 guaranteed_lead: bool = False):
+                 guaranteed_lead: bool = False,
+                 objective: Optional[ObjectiveConfig] = None,
+                 spring_endgame_cards: int = 12):
         self.cfg = cfg
         self.endgame_cards = endgame_cards
         self.endgame_k = endgame_k
         self.seed = seed
         self._calls = 0
         self.guaranteed_lead = guaranteed_lead
+        self.objective = objective or ObjectiveConfig()
+        self.spring_endgame_cards = spring_endgame_cards
 
     def reset(self) -> None:
         self._calls = 0
@@ -48,7 +54,13 @@ class M1Policy:
                       moves: List[Move]) -> Optional[Move]:
         if not self.endgame_cards:
             return None
-        if sum(state.remaining_cards()) > self.endgame_cards:
+        total = sum(state.remaining_cards())
+        zero_opp = zero_play_opponents(state.tricks, state.current)
+        spring_live = (zero_opp > 0
+                       and min_steps(state.hand(), self.cfg) <= 2)
+        limit = max(self.endgame_cards,
+                    self.spring_endgame_cards if spring_live else 0)
+        if total > limit:
             return None
         from ..infer.sampler import SamplingError, sample_worlds
         from ..search.endgame import solve_worlds
@@ -60,7 +72,8 @@ class M1Policy:
         except SamplingError:
             # 证据约束过紧时退回普通 M1，而不是偷偷使用伪一致世界。
             return None
-        mv = solve_worlds(state, worlds, self.cfg)
+        mv = solve_worlds(state, worlds, self.cfg,
+                          objective=self.objective)
         return mv if mv in moves else None
 
     # ------------------------------------------------------------------
@@ -69,6 +82,61 @@ class M1Policy:
         hand = state.hand()
         return (min_steps(hand, self.cfg)
                 - min_steps(hand - move.cards, self.cfg))
+
+    def _score_metrics(self, state: GameState, move: Move,
+                       hand: int) -> Tuple[float, float, int, bool, float]:
+        """返回 (净分代理, progress, 之后手数, 是否走完, 保权概率)。"""
+        after = hand - move.cards
+        steps_after = min_steps(after, self.cfg)
+        progress = min_steps(hand, self.cfg) - steps_after
+        child = state.apply(move, self.cfg)
+        p = state.current
+        bomb_delta = child.bombs[p] - state.bombs[p]
+        keep = keep_lead_prob(state, state.current, move, self.cfg)
+        zero_opp = zero_play_opponents(state.tricks, p)
+        finish = after == 0
+        spring = 0.0
+        # 只有已经进入“一手内走完”的区间，春天才具有可兑现性；
+        # 局中过早追逐 30 分会牺牲基础分和胜率，实测净分反而下降。
+        if zero_opp and not move.is_pass and (finish or steps_after <= 1):
+            spring = (keep if not finish else 1.0) * zero_opp \
+                * self.cfg.spring_score
+        score = (self.objective.bomb_weight * bomb_delta
+                 + self.objective.spring_weight * spring
+                 + 0.5 * progress
+                 - 0.25 * burn_cost(move))
+        return score, float(progress), steps_after, finish, keep
+
+    def _rank_win_primary(self, state: GameState,
+                          pool: List[Move], hand: int) -> List[Move]:
+        progs = [(m, self._progress(state, m)) for m in pool]
+        top = max(p for _, p in progs)
+        pool = [m for m, p in progs if p == top]
+
+        # 残局兑现: 打完只剩 1 手且对手确定管不起 => 直接锁定胜局。
+        fin = []
+        for m in pool:
+            if min_steps(hand - m.cards, self.cfg) <= 1:
+                if keep_lead_prob(state, state.current, m, self.cfg) >= SAFE_P:
+                    fin.append(m)
+        if fin:
+            return sorted(fin, key=lambda m: (-C.total(m.cards),
+                                              burn_cost(m), -m.max_rank))
+
+        if self.guaranteed_lead:
+            sure = [m for m in pool
+                    if burn_cost(m) == 0.0
+                    and keep_lead_prob(state, state.current, m, self.cfg) >= 1.0]
+            if sure:
+                return sorted(sure, key=lambda m: (-C.total(m.cards),
+                                                   m.max_rank))
+
+        if state.last_play is None:
+            cheap = [m for m in pool if burn_cost(m) == 0.0]
+            if cheap:
+                pool = cheap
+        pool.sort(key=lambda m: (m.max_rank, -C.total(m.cards)))
+        return pool
 
     def rank_moves(self, state: GameState,
                    moves: Optional[List[Move]] = None) -> List[Move]:
@@ -84,37 +152,25 @@ class M1Policy:
         if not pool:
             return ms
 
-        progs = [(m, self._progress(state, m)) for m in pool]
-        top = max(p for _, p in progs)
-        pool = [m for m, p in progs if p == top]
+        if not self.objective.score_primary:
+            return self._rank_win_primary(state, pool, hand)
 
-        # 残局兑现: 打完只剩 1 手且对手确定管不起 => 直接锁定胜局（+6~8pp 实测）
-        fin = []
-        for m in pool:
-            if min_steps(hand - m.cards, self.cfg) <= 1:
-                if keep_lead_prob(state, state.current, m, self.cfg) >= SAFE_P:
-                    fin.append(m)
-        if fin:
-            return sorted(fin, key=lambda m: (-C.total(m.cards),
-                                              burn_cost(m), -m.max_rank))
-
-        # 确定性保权（M2）: 证据/已出牌能证明对手管不起、且不烧大牌时优先兑现。
-        # 历史尝试中概率型保权（>0.8）明显退化，因此只保留可证明的 >=1.0。
-        if self.guaranteed_lead:
-            sure = [m for m in pool
-                    if burn_cost(m) == 0.0
-                    and keep_lead_prob(state, state.current, m, self.cfg) >= 1.0]
-            if sure:
-                return sorted(sure, key=lambda m: (-C.total(m.cards),
-                                                   m.max_rank))
-
-        if state.last_play is None:
-            cheap = [m for m in pool if burn_cost(m) == 0.0]
-            if cheap:
-                pool = cheap
-
-        pool.sort(key=lambda m: (m.max_rank, -C.total(m.cards)))
-        return pool
+        # 净分模式：先用原胜率排序得到 win-safe 集合，再只在集合内按
+        # 基础分/春天/炸弹净分重排。禁止为了分项收益跳出胜率安全集。
+        safe_moves = self._rank_win_primary(state, pool, hand)
+        info = []
+        for m in safe_moves:
+            score, prog, steps_after, finish, keep = self._score_metrics(
+                state, m, hand)
+            info.append({
+                "move": m, "score": score, "progress": prog,
+                "steps_after": steps_after, "finish": finish,
+                "keep": keep, "bomb": m.type == MoveType.BOMB,
+            })
+        info.sort(key=lambda x: (-x["score"], -x["progress"],
+                                 x["steps_after"], -C.total(x["move"].cards),
+                                 x["move"].max_rank))
+        return [x["move"] for x in info]
 
     def act(self, state: GameState,
             moves: Optional[List[Move]] = None) -> Move:

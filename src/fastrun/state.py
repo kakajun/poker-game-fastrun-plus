@@ -141,19 +141,9 @@ class GameState:
     @staticmethod
     def _final_scores(hands, tricks, bombs, winner: int,
                       cfg: RuleConfig) -> List[int]:
-        base = [0, 0, 0]
-        gain = 0
-        for i in range(3):
-            if i == winner:
-                continue
-            remain = C.total(hands[i])
-            loss = 0 if (cfg.protect_one_card and remain == 1) else remain
-            if tricks[i] == 0:
-                loss += cfg.spring_score
-            base[i] -= loss
-            gain += loss
-        base[winner] = gain
-        return [base[i] + bombs[i] for i in range(3)]
+        # 延迟导入，避免 fastrun 与 eval 包在模块初始化时形成环。
+        from ..eval.score_ev import terminal_scores
+        return terminal_scores(hands, tricks, bombs, winner, cfg)
 
     # ------------------------------------------------------------ 调试
 

@@ -7,6 +7,7 @@ from ..fastrun import cards as C
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
 from ..fastrun.rules import Move, MoveType
 from ..fastrun.state import GameState
+from ..eval.objective import ObjectiveConfig
 from ..eval.policy_m1 import M1Policy
 
 
@@ -50,8 +51,9 @@ class GreedyMinAgent(Agent):
 class M1Agent(Agent):
     name = "m1"
 
-    def __init__(self, cfg: RuleConfig = DEFAULT_RULES):
-        self.policy = M1Policy(cfg)
+    def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
+                 objective: Optional[ObjectiveConfig] = None):
+        self.policy = M1Policy(cfg, objective=objective)
 
     def reset(self) -> None:
         self.policy.reset()
@@ -67,10 +69,12 @@ class M2Agent(Agent):
 
     def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
                  endgame_cards: int = 8, endgame_k: int = 8, seed: int = 0,
-                 guaranteed_lead: bool = True):
+                 guaranteed_lead: bool = True,
+                 objective: Optional[ObjectiveConfig] = None):
         self.policy = M1Policy(cfg, endgame_cards=endgame_cards,
                                endgame_k=endgame_k, seed=seed,
-                               guaranteed_lead=guaranteed_lead)
+                               guaranteed_lead=guaranteed_lead,
+                               objective=objective)
 
     def reset(self) -> None:
         self.policy.reset()
@@ -297,13 +301,40 @@ class PolicyAgent(Agent):
 
     def __init__(self, cfg: RuleConfig = DEFAULT_RULES,
                  model_path: str = "models/policy_v3.pt",
-                 device: str = "cuda", win_tie_epsilon: float = 1e-6):
+                 device: str = "cuda",
+                 objective: Optional[ObjectiveConfig] = None,
+                 win_guard: Optional[float] = None,
+                 endgame_cards: Optional[int] = None,
+                 endgame_k: Optional[int] = None,
+                 seed: int = 0):
         self.cfg = cfg
         self.model_path = model_path
         self.device = device
-        self.win_tie_epsilon = win_tie_epsilon
+        self.seed = seed
+        self._win_guard_override = win_guard
+        self._endgame_override = endgame_cards
+        self._endgame_k_override = endgame_k
+        self.objective = objective or ObjectiveConfig(
+            win_guard=0.01 if win_guard is None else win_guard)
+        self.win_guard = self.objective.win_guard
+        self.endgame_cards = int(endgame_cards or 0)
+        self.endgame_k = int(endgame_k or 6)
+        self._endgame = None
+        self._refresh_endgame()
         self._model = None
         self._torch = None
+
+    def _refresh_endgame(self) -> None:
+        self._endgame = (M1Policy(self.cfg,
+                                  endgame_cards=self.endgame_cards,
+                                  endgame_k=self.endgame_k,
+                                  seed=self.seed,
+                                  objective=self.objective)
+                         if self.endgame_cards else None)
+
+    def reset(self) -> None:
+        if self._endgame is not None:
+            self._endgame.reset()
 
     def _load(self):
         if self._model is not None:
@@ -312,6 +343,7 @@ class PolicyAgent(Agent):
         from ..net.encode_v3 import (ACTION_VERSION, EVENT_DIM,
                                      FEATURE_VERSION, HISTORY_STEPS, MOVE_DIM,
                                      STATE_DIM)
+        from ..eval.objective import OBJECTIVE_VERSION
         from ..net.model import ENGINE_VERSION, load
         if self.device == "cuda" and not torch.cuda.is_available():
             self.device = "cpu"
@@ -323,9 +355,30 @@ class PolicyAgent(Agent):
             "move_dim": MOVE_DIM,
             "history_steps": HISTORY_STEPS,
             "event_dim": EVENT_DIM,
+            "objective_version": OBJECTIVE_VERSION,
         }
-        model, _ = load(self.model_path, map_location=self.device,
-                        expected=expected, require_meta=True)
+        model, meta = load(self.model_path, map_location=self.device,
+                           expected=expected, require_meta=True)
+        if self._win_guard_override is None and "win_guard" in meta:
+            # 未显式指定时沿用 checkpoint 训练时的胜率守卫。
+            self.objective = ObjectiveConfig(
+                mode=self.objective.mode,
+                win_guard=float(meta["win_guard"]),
+                spring_weight=self.objective.spring_weight,
+                bomb_weight=self.objective.bomb_weight,
+                max_extra_steps=self.objective.max_extra_steps)
+            self.win_guard = self.objective.win_guard
+        if self._endgame_override is None or self._endgame_k_override is None:
+            # 部署配置随 checkpoint 走：残局搜索阈值与世界数。
+            changed = False
+            if self._endgame_override is None and "endgame_cards" in meta:
+                self.endgame_cards = int(meta["endgame_cards"])
+                changed = True
+            if self._endgame_k_override is None and "endgame_k" in meta:
+                self.endgame_k = int(meta["endgame_k"])
+                changed = True
+            if changed:
+                self._refresh_endgame()
         model.to(self.device)
         self._torch = torch
         self._model = model
@@ -360,16 +413,20 @@ class PolicyAgent(Agent):
         ms, prob, score = self.evaluate(state, moves)
         if len(ms) <= 1:
             return ms[0]
-        best_win = float(prob.max())
-        eligible = np.flatnonzero(prob >= best_win - self.win_tie_epsilon)
-        best = int(eligible[np.argmax(score[eligible])])
+        if self._endgame is not None:
+            eg = self._endgame._endgame_move(state, ms)
+            if eg is not None:
+                return eg
+        best = self.objective.select_index(prob.tolist(), score.tolist())
         return ms[best]
 
     def rank_moves(self, state, moves=None):
         ms, prob, score = self.evaluate(state, moves)
-        order = sorted(range(len(ms)),
-                       key=lambda i: (-float(prob[i]), -float(score[i])))
-        return [ms[i] for i in order]
+        if self.objective.score_primary:
+            key = lambda i: (-float(score[i]), -float(prob[i]))
+        else:
+            key = lambda i: (-float(prob[i]), -float(score[i]))
+        return [ms[i] for i in sorted(range(len(ms)), key=key)]
 
 
 class SearchAgent(Agent):
@@ -378,11 +435,13 @@ class SearchAgent(Agent):
     name = "search"
 
     def __init__(self, cfg: RuleConfig = DEFAULT_RULES, k: int = 8,
-                 limit: int = 8, seed: int = 0):
+                 limit: int = 8, seed: int = 0,
+                 objective: Optional[ObjectiveConfig] = None):
         self.cfg = cfg
         self.k = k
         self.limit = limit
         self.seed = seed
+        self.objective = objective or ObjectiveConfig()
         self.calls = 0
 
     def reset(self) -> None:
@@ -392,7 +451,8 @@ class SearchAgent(Agent):
         from ..search.pimc import choose
         self.calls += 1
         return choose(state, self.cfg, self.k, self.limit,
-                      self.seed * 100003 + self.calls)
+                      self.seed * 100003 + self.calls,
+                      objective=self.objective)
 
 
 class ScriptedAgent(Agent):

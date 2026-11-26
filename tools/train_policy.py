@@ -1,11 +1,12 @@
-"""训练 v3 全动作策略网。
+"""训练 v4 全动作策略网。
 
 数据来自 `tools/gen_counterfactual_data.py`；按 dataset 内的 split/deal 隔离。
-主目标是相对优势排序（listwise 或 pairwise），绝对胜率/净分只作辅助监督。
+主目标是净分排序，胜率只作低权重约束；选模要求胜率 regret 不超过最优容差，
+再取净分 regret 最低的 checkpoint。
 
 运行:
-  python tools/train_policy.py --data "data/cf_v3.w*.npz" \
-      --out models/policy_v3.pt --seeds 0,1,2
+  python tools/train_policy.py --data "data/cf_v4.train.w*.npz,data/cf_v4.val.w*.npz" \
+      --out models/policy_v4.pt --seeds 0,1,2
 """
 
 import argparse
@@ -21,6 +22,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.eval.objective import OBJECTIVE_VERSION, ObjectiveConfig
 from src.fastrun.config import DEFAULT_RULES
 from src.net.encode_v3 import (ACTION_VERSION, EVENT_DIM, FEATURE_VERSION,
                                HISTORY_STEPS, MOVE_DIM, STATE_DIM)
@@ -29,7 +31,9 @@ from src.net.model import ENGINE_VERSION, PolicyNetV3, save
 
 class Dataset:
     def __init__(self, states, history, actions, offsets, win, score,
-                 win_se, score_se, split, deal_id, indices):
+                 win_se, score_se, base_score, spring_score, bomb_score,
+                 spring_opponents, full_spring,
+                 split, deal_id, indices):
         self.states = states
         self.history = history
         self.actions = actions
@@ -38,6 +42,11 @@ class Dataset:
         self.score = score
         self.win_se = win_se
         self.score_se = score_se
+        self.base_score = base_score
+        self.spring_score = spring_score
+        self.bomb_score = bomb_score
+        self.spring_opponents = spring_opponents
+        self.full_spring = full_spring
         self.split = split
         self.deal_id = deal_id
         self.indices = np.asarray(indices, dtype=np.int64)
@@ -55,6 +64,11 @@ class Dataset:
         score = np.zeros((n, kmax), dtype=np.float32)
         wse = np.zeros((n, kmax), dtype=np.float32)
         sse = np.zeros((n, kmax), dtype=np.float32)
+        base_s = np.zeros((n, kmax), dtype=np.float32)
+        spring_s = np.zeros((n, kmax), dtype=np.float32)
+        bomb_s = np.zeros((n, kmax), dtype=np.float32)
+        spring_opp = np.zeros((n, kmax), dtype=np.float32)
+        full_spring = np.zeros((n, kmax), dtype=np.float32)
         mask = np.zeros((n, kmax), dtype=np.float32)
         for j, (row, k) in enumerate(zip(rows, ks)):
             a, b = self.offsets[row], self.offsets[row + 1]
@@ -63,6 +77,11 @@ class Dataset:
             score[j, :k] = self.score[a:b]
             wse[j, :k] = self.win_se[a:b]
             sse[j, :k] = self.score_se[a:b]
+            base_s[j, :k] = self.base_score[a:b]
+            spring_s[j, :k] = self.spring_score[a:b]
+            bomb_s[j, :k] = self.bomb_score[a:b]
+            spring_opp[j, :k] = self.spring_opponents[a:b]
+            full_spring[j, :k] = self.full_spring[a:b]
             mask[j, :k] = 1.0
         return {
             "state": torch.from_numpy(self.states[rows].astype(np.float32)),
@@ -72,6 +91,11 @@ class Dataset:
             "score": torch.from_numpy(score),
             "win_se": torch.from_numpy(wse),
             "score_se": torch.from_numpy(sse),
+            "base_score": torch.from_numpy(base_s),
+            "spring_score": torch.from_numpy(spring_s),
+            "bomb_score": torch.from_numpy(bomb_s),
+            "spring_opponents": torch.from_numpy(spring_opp),
+            "full_spring": torch.from_numpy(full_spring),
             "mask": torch.from_numpy(mask),
         }
 
@@ -83,13 +107,17 @@ def load_dataset(patterns):
         raise SystemExit(f"no data: {patterns}")
     states, histories, action_parts = [], [], []
     win, score, win_se, score_se = [], [], [], []
+    base_score, spring_score, bomb_score = [], [], []
+    spring_opponents, full_spring = [], []
     split, deal_id = [], []
     base = 0
     offsets = [0]
     for f in files:
         d = np.load(f)
         required = ("state", "history", "actions", "action_offsets",
-                    "win", "score", "win_se", "score_se", "split", "deal_id")
+                    "win", "score", "win_se", "score_se",
+                    "base_score", "spring_score", "bomb_score",
+                    "spring_opponents", "full_spring", "split", "deal_id")
         missing = [k for k in required if k not in d]
         if missing:
             raise SystemExit(f"{f} missing fields: {missing}")
@@ -124,6 +152,11 @@ def load_dataset(patterns):
         score.append(d["score"])
         win_se.append(d["win_se"])
         score_se.append(d["score_se"])
+        base_score.append(d["base_score"])
+        spring_score.append(d["spring_score"])
+        bomb_score.append(d["bomb_score"])
+        spring_opponents.append(d["spring_opponents"])
+        full_spring.append(d["full_spring"])
         split.append(d["split"])
         deal_id.append(d["deal_id"])
         for x in local_off[1:]:
@@ -141,40 +174,23 @@ def load_dataset(patterns):
         "score": np.concatenate(score),
         "win_se": np.concatenate(win_se),
         "score_se": np.concatenate(score_se),
+        "base_score": np.concatenate(base_score),
+        "spring_score": np.concatenate(spring_score),
+        "bomb_score": np.concatenate(bomb_score),
+        "spring_opponents": np.concatenate(spring_opponents),
+        "full_spring": np.concatenate(full_spring),
         "split": np.concatenate(split).astype(np.int8),
         "deal_id": np.concatenate(deal_id).astype(np.int64),
     }
 
 
-def _subset(data, indices):
-    idx = np.asarray(indices, dtype=np.int64)
-    offsets = [0]
-    action_parts = []
-    label_fields = ("win", "score", "win_se", "score_se")
-    labels = {k: [] for k in label_fields}
-    for i in idx:
-        a, b = int(data["offsets"][i]), int(data["offsets"][i + 1])
-        action_parts.append(data["actions"][a:b])
-        for k in label_fields:
-            labels[k].append(data[k][a:b])
-        offsets.append(offsets[-1] + b - a)
-    out = {
-        "states": data["states"][idx],
-        "history": data["history"][idx],
-        "actions": np.concatenate(action_parts),
-        "offsets": np.asarray(offsets, dtype=np.int64),
-        "split": data["split"][idx],
-        "deal_id": data["deal_id"][idx],
-    }
-    for k in label_fields:
-        out[k] = np.concatenate(labels[k])
-    return out
-
-
 def make_dataset(data, mask):
     return Dataset(data["states"], data["history"], data["actions"],
                    data["offsets"], data["win"], data["score"], data["win_se"],
-                   data["score_se"], data["split"], data["deal_id"], mask)
+                   data["score_se"], data["base_score"],
+                   data["spring_score"], data["bomb_score"],
+                   data["spring_opponents"], data["full_spring"],
+                   data["split"], data["deal_id"], mask)
 
 
 def masked_listwise_loss(logits, target, mask, temp):
@@ -208,28 +224,42 @@ def evaluate(model, ds, args, device):
     total = 0.0
     count = 0
     regret_w = regret_s = 0.0
+    picked_spring = picked_bomb = picked_full = 0.0
     pair_hits = pair_total = 0
     eval_batch = min(args.batch, 64)
+    objective = ObjectiveConfig(mode=args.objective_mode,
+                                win_guard=args.win_guard)
     with torch.no_grad():
         for start in range(0, len(ds), eval_batch):
             b = ds.batch(np.arange(start, min(start + eval_batch, len(ds))))
             b = {k: v.to(device) for k, v in b.items()}
             win, score = model(b["state"], b["history"], b["actions"])
             mask = b["mask"]
-            loss = masked_listwise_loss(win, b["win"], mask, args.win_temp)
-            loss += 0.25 * masked_listwise_loss(
+            loss = masked_listwise_loss(
                 score, b["score"], mask, args.score_temp)
+            loss += args.win_weight * masked_listwise_loss(
+                win, b["win"], mask, args.win_temp)
             total += float(loss) * len(mask)
             count += len(mask)
 
             masked_win = win.masked_fill(mask < 0.5, -1e9)
-            pick = masked_win.argmax(-1, keepdim=True)
+            if objective.score_primary:
+                best_w = masked_win.max(-1, keepdim=True).values
+                eligible = mask.bool() & (
+                    win >= best_w - objective.win_guard)
+                masked_score = score.masked_fill(~eligible, -1e9)
+                pick = masked_score.argmax(-1, keepdim=True)
+            else:
+                pick = masked_win.argmax(-1, keepdim=True)
             sw = b["win"].gather(1, pick).squeeze(1)
             ss = b["score"].gather(1, pick).squeeze(1)
             best_w = b["win"].masked_fill(mask < 0.5, -1e9).max(-1).values
             best_s = b["score"].masked_fill(mask < 0.5, -1e9).max(-1).values
             regret_w += float((best_w - sw).sum())
             regret_s += float((best_s - ss).sum())
+            picked_spring += float(b["spring_score"].gather(1, pick).sum())
+            picked_bomb += float(b["bomb_score"].gather(1, pick).sum())
+            picked_full += float(b["full_spring"].gather(1, pick).sum())
 
             # 仅统计教师确实有差别的候选对；向量化避免 K^2 的 Python 循环。
             pred_diff = win.unsqueeze(2) - win.unsqueeze(1)
@@ -246,6 +276,9 @@ def evaluate(model, ds, args, device):
         "loss": total / max(1, count),
         "regret_win": regret_w / max(1, count),
         "regret_score": regret_s / max(1, count),
+        "spring_mean": picked_spring / max(1, count),
+        "bomb_mean": picked_bomb / max(1, count),
+        "full_spring_rate": picked_full / max(1, count),
         "pairwise_acc": pair_hits / max(1, pair_total),
         "n": count,
     }
@@ -265,9 +298,8 @@ def train_one(data, train_idx, val_idx, args, seed, device):
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=args.epochs * steps_per_epoch)
 
-    best = float("inf")
-    best_state = None
-    best_val = None
+    best_score = float("inf")
+    candidates = []
     bad_epochs = 0
     for ep in range(1, args.epochs + 1):
         model.train()
@@ -294,8 +326,9 @@ def train_one(data, train_idx, val_idx, args, seed, device):
             bce = F.binary_cross_entropy_with_logits(
                 win[m], b["win"][m], reduction="none")
             mse = F.mse_loss(score[m], b["score"][m], reduction="none")
-            aux = ((bce + 0.25 * mse) * sample_w[m]).mean()
-            loss = main_w + 0.25 * main_s + args.aux_weight * aux
+            aux = ((0.25 * bce + mse) * sample_w[m]).mean()
+            loss = (main_s + args.win_weight * main_w
+                    + args.aux_weight * aux)
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -308,30 +341,39 @@ def train_one(data, train_idx, val_idx, args, seed, device):
         print(f"seed {seed} epoch {ep:2d} loss={tot/max(1,steps):.4f} "
               f"val_regret_win={val['regret_win']:.4f} "
               f"val_regret_score={val['regret_score']:.4f} "
+              f"spring={val['spring_mean']:+.3f} "
+              f"bomb={val['bomb_mean']:+.3f} "
               f"pairwise={val['pairwise_acc']:.2%}")
-        if val["regret_win"] + 0.25 * val["regret_score"] < best - 1e-5:
-            best = val["regret_win"] + 0.25 * val["regret_score"]
-            best_state = {k: v.detach().cpu().clone()
-                          for k, v in model.state_dict().items()}
-            best_val = val
+        state = {k: v.detach().cpu().clone()
+                 for k, v in model.state_dict().items()}
+        candidates.append((val["regret_win"], val["regret_score"],
+                           state, val))
+        if val["regret_score"] < best_score - 1e-5:
+            best_score = val["regret_score"]
             bad_epochs = 0
         else:
             bad_epochs += 1
             if bad_epochs >= args.patience:
                 print(f"seed {seed} early stop at epoch {ep}")
                 break
-    if best_state is not None:
-        model.load_state_dict(best_state)
-    return model, best, (best_val if best_val is not None else val)
+
+    if not candidates:
+        raise RuntimeError("no training epochs completed")
+    min_win = min(c[0] for c in candidates)
+    eligible = [c for c in candidates
+                if c[0] <= min_win + args.win_tolerance]
+    best = min(eligible, key=lambda c: c[1])
+    model.load_state_dict(best[2])
+    return model, best[1], best[3]
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=str,
-                    default=("data/cf_v3.train.w*.npz,"
-                             "data/cf_v3.val.w*.npz"),
+                    default=("data/cf_v4.train.w*.npz,"
+                             "data/cf_v4.val.w*.npz"),
                     help="只允许 train/val 分片；test 分片会被拒绝")
-    ap.add_argument("--out", type=str, default="models/policy_v3.pt")
+    ap.add_argument("--out", type=str, default="models/policy_v4.pt")
     ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=3e-4)
@@ -340,6 +382,14 @@ def main() -> None:
                     default="flatten")
     ap.add_argument("--loss", choices=("listwise", "pairwise"),
                     default="listwise")
+    ap.add_argument("--objective-mode",
+                    choices=("score_primary", "win_primary"),
+                    default="score_primary")
+    ap.add_argument("--win-guard", type=float, default=0.01)
+    ap.add_argument("--win-weight", type=float, default=0.25,
+                    help="胜率排序损失的辅助权重")
+    ap.add_argument("--win-tolerance", type=float, default=0.02,
+                    help="选模允许的胜率 regret 容差")
     ap.add_argument("--win-temp", type=float, default=0.2)
     ap.add_argument("--score-temp", type=float, default=0.15)
     ap.add_argument("--pairs", type=int, default=32)
@@ -399,6 +449,11 @@ def main() -> None:
             "seed": seed,
             "seeds": seeds,
             "loss": args.loss,
+            "objective_mode": args.objective_mode,
+            "objective_version": OBJECTIVE_VERSION,
+            "win_guard": args.win_guard,
+            "win_weight": args.win_weight,
+            "win_tolerance": args.win_tolerance,
             "win_temp": args.win_temp,
             "score_temp": args.score_temp,
             "aux_weight": args.aux_weight,

@@ -8,6 +8,7 @@
 成本: K 个确定性化 × 候选数 × 一轮内 2~6 步，实测 5~15ms/决策。
 """
 
+import math
 import random
 from dataclasses import replace
 from typing import List, Optional, Tuple
@@ -18,6 +19,8 @@ from ..fastrun.rules import Move, MoveType
 from ..fastrun.state import GameState
 from ..infer.sampler import SamplingError, sample_world
 from ..eval.decompose import min_steps
+from ..eval.objective import ObjectiveConfig
+from ..eval.score_ev import zero_play_opponents
 
 
 def _greedy_choice(state: GameState, ms: List[Move]) -> Move:
@@ -40,20 +43,33 @@ def _rollout_trick(state: GameState, cfg: RuleConfig) -> GameState:
     return st
 
 
-def _value(state: GameState, me: int, cfg: RuleConfig) -> float:
+def _value(state: GameState, me: int, cfg: RuleConfig,
+           objective: ObjectiveConfig) -> Tuple[float, float]:
+    """返回 (胜率代理, 净分代理)；终局使用真实 scores。"""
     if state.over:
-        rem = C.total(state.hands[me])
-        return 200.0 if state.winner == me else -200.0 - rem
+        return (1.0 if state.winner == me else 0.0,
+                float(state.scores[me]))
     mine = min_steps(state.hands[me], cfg)
-    opp = [min_steps(state.hands[q], cfg) for q in range(3) if q != me]
-    v = -1.0 * mine + 0.5 * (sum(opp) / 2.0)
+    opp_steps = [min_steps(state.hands[q], cfg)
+                 for q in range(3) if q != me]
+    opp = min(opp_steps)
+    win = 1.0 / (1.0 + math.exp(
+        max(-60.0, min(60.0, (mine - opp) / 1.5))))
+    own_cards = C.total(state.hands[me])
+    opp_cards = sum(C.total(state.hands[q]) for q in range(3) if q != me)
+    base = win * opp_cards - (1.0 - win) * own_cards
+    zero_opp = zero_play_opponents(state.tricks, me)
+    spring = (objective.spring_weight * zero_opp * cfg.spring_score
+              * win * win)
+    bomb = objective.bomb_weight * float(state.bombs[me])
     if state.current == me and state.last_play is None:
-        v += 1.0        # 我拿到首出权
-    return v
+        base += 1.0
+    return win, base + spring + bomb
 
 
 def _candidates(state: GameState, ms: List[Move],
-                cfg: RuleConfig, limit: int) -> List[Move]:
+                cfg: RuleConfig, limit: int,
+                objective: ObjectiveConfig) -> List[Move]:
     hand = state.hand()
     if any(m.cards == hand and not m.is_pass for m in ms):
         return [m for m in ms if m.cards == hand and not m.is_pass]
@@ -63,20 +79,28 @@ def _candidates(state: GameState, ms: List[Move],
     base = min_steps(hand, cfg)
     scored = []
     for m in pool:
-        prog = base - min_steps(hand - m.cards, cfg)
-        scored.append((prog, -m.max_rank, C.total(m.cards), m))
-    scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
-    top_prog = scored[0][0]
-    out = [x[3] for x in scored if x[0] == top_prog]
-    return out[:limit] if out else pool[:limit]
+        after = min_steps(hand - m.cards, cfg)
+        prog = base - after
+        scored.append((after, prog, -m.max_rank, C.total(m.cards), m))
+    min_steps_after = min(x[0] for x in scored)
+    limit_steps = min_steps_after + objective.max_extra_steps
+    safe = [x for x in scored
+            if x[0] <= limit_steps
+            or (x[4].type == MoveType.BOMB and x[0] <= limit_steps + 1)]
+    if not safe:
+        safe = [x for x in scored if x[0] == min_steps_after]
+    safe.sort(key=lambda x: (x[1], x[2], x[3]), reverse=True)
+    return [x[4] for x in safe[:limit]]
 
 
 def choose(state: GameState, cfg: RuleConfig = DEFAULT_RULES,
-           k: int = 8, limit: int = 8, seed: int = 0) -> Move:
+           k: int = 8, limit: int = 8, seed: int = 0,
+           objective: Optional[ObjectiveConfig] = None) -> Move:
+    objective = objective or ObjectiveConfig()
     ms = state.legal_moves(cfg)
     if len(ms) <= 1:
         return ms[0]
-    cands = _candidates(state, ms, cfg, limit)
+    cands = _candidates(state, ms, cfg, limit, objective)
     if len(cands) == 1:
         return cands[0]
 
@@ -90,16 +114,17 @@ def choose(state: GameState, cfg: RuleConfig = DEFAULT_RULES,
         # 不拿不满足 Pass 证据的世界做搜索；退回启发式候选首位。
         return cands[0]
 
-    best_val = -1e18
-    best: Optional[Move] = None
+    wins: List[float] = []
+    scores: List[float] = []
     for m in cands:
-        total = 0.0
+        win_total = 0.0
+        score_total = 0.0
         for w in worlds:
             st = w.apply(m, cfg)
             st = _rollout_trick(st, cfg)
-            total += _value(st, me, cfg)
-        avg = total / k
-        if avg > best_val:
-            best_val = avg
-            best = m
-    return best if best is not None else cands[0]
+            win, score = _value(st, me, cfg, objective)
+            win_total += win
+            score_total += score
+        wins.append(win_total / k)
+        scores.append(score_total / k)
+    return cands[objective.select_index(wins, scores)]

@@ -12,7 +12,9 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..eval.score_ev import score_breakdowns
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
+from ..fastrun.rules import MoveType
 from ..fastrun.state import GameState
 from .agents import Agent
 
@@ -35,6 +37,13 @@ class GameRecord:
     win: int
     score: float
     ms: float
+    base: float = 0.0
+    spring: float = 0.0
+    bomb: float = 0.0
+    spring_opponents: int = 0
+    full_spring: int = 0
+    hero_bombs: int = 0
+    opp_bombs: int = 0
 
 
 @dataclass
@@ -45,13 +54,25 @@ class PairedDiff:
     win_ci: Tuple[float, float]
     score_diff: float
     score_ci: Tuple[float, float]
+    base_diff: float = 0.0
+    base_ci: Tuple[float, float] = (0.0, 0.0)
+    spring_diff: float = 0.0
+    spring_ci: Tuple[float, float] = (0.0, 0.0)
+    bomb_diff: float = 0.0
+    bomb_ci: Tuple[float, float] = (0.0, 0.0)
 
     def __str__(self) -> str:
         return (f"deals={self.n_deals} games={self.n_games} "
                 f"Δwin={self.win_diff:+.2%} "
                 f"[{self.win_ci[0]:+.2%},{self.win_ci[1]:+.2%}] "
                 f"Δscore={self.score_diff:+.3f} "
-                f"[{self.score_ci[0]:+.3f},{self.score_ci[1]:+.3f}]")
+                f"[{self.score_ci[0]:+.3f},{self.score_ci[1]:+.3f}] "
+                f"Δbase={self.base_diff:+.3f} "
+                f"[{self.base_ci[0]:+.3f},{self.base_ci[1]:+.3f}] "
+                f"Δspring={self.spring_diff:+.3f} "
+                f"[{self.spring_ci[0]:+.3f},{self.spring_ci[1]:+.3f}] "
+                f"Δbomb={self.bomb_diff:+.3f} "
+                f"[{self.bomb_ci[0]:+.3f},{self.bomb_ci[1]:+.3f}]")
 
 
 @dataclass
@@ -65,6 +86,12 @@ class MatchReport:
     avg_ms: float
     ci: Tuple[float, float]
     records: Tuple[GameRecord, ...] = ()
+    avg_base: float = 0.0
+    avg_spring: float = 0.0
+    avg_bomb: float = 0.0
+    partial_spring_rate: float = 0.0
+    full_spring_rate: float = 0.0
+    bomb_game_rate: float = 0.0
 
     @property
     def win_rate(self) -> float:
@@ -73,8 +100,12 @@ class MatchReport:
     def __str__(self) -> str:
         lo, hi = self.ci
         return (f"{self.label:<28} n={self.n:4d}  win={self.win_rate:6.1%} "
-                f"[{lo:.1%},{hi:.1%}]  score={self.avg_score:+6.2f}  "
-                f"spring={self.spring_rate:5.1%}  {self.avg_ms:5.2f}ms/decision")
+                f"[{lo:.1%},{hi:.1%}]  score={self.avg_score:+6.2f} "
+                f"(base={self.avg_base:+.2f} spring={self.avg_spring:+.2f} "
+                f"bomb={self.avg_bomb:+.2f})  spring={self.spring_rate:5.1%} "
+                f"full={self.full_spring_rate:5.1%} "
+                f"bomb_games={self.bomb_game_rate:5.1%}  "
+                f"{self.avg_ms:5.2f}ms/decision")
 
 
 def play_game(agents: Sequence[Agent], cfg: RuleConfig,
@@ -111,7 +142,8 @@ def run_duplicate(hero: Agent, villains: Sequence[Agent],
     wins = 0
     losses = 0
     springs = 0
-    score_sum = 0
+    partial_springs = full_springs = bomb_games = 0
+    score_sum = base_sum = spring_sum = bomb_sum = 0.0
     ms_sum = 0.0
     n = 0
     t_start = time.perf_counter()
@@ -132,11 +164,23 @@ def run_duplicate(hero: Agent, villains: Sequence[Agent],
             st, avg_ms = play_game(agents, cfg, st, hero_seat=seat)
             n += 1
             ms_sum += avg_ms
-            score_sum += st.scores[seat]
+            bd = score_breakdowns(
+                st.hands, st.tricks, st.bombs, st.winner, cfg)[seat]
+            score_sum += bd.total
+            base_sum += bd.base
+            spring_sum += bd.spring
+            bomb_sum += bd.bomb
+            hb = sum(1 for p, m in st.action_log
+                     if p == seat and m.type == MoveType.BOMB)
+            bomb_games += int(hb > 0)
             if st.winner == seat:
                 wins += 1
-                if any(st.tricks[q] == 0 for q in range(3) if q != seat):
+                if bd.spring_opponents:
                     springs += 1
+                if bd.full_spring:
+                    full_springs += 1
+                elif bd.spring_opponents == 1:
+                    partial_springs += 1
             else:
                 losses += 1
 
@@ -147,6 +191,12 @@ def run_duplicate(hero: Agent, villains: Sequence[Agent],
         spring_rate=springs / wins if wins else 0.0,
         avg_ms=ms_sum / n,
         ci=wilson(wins, n),
+        avg_base=base_sum / n,
+        avg_spring=spring_sum / n,
+        avg_bomb=bomb_sum / n,
+        partial_spring_rate=partial_springs / n,
+        full_spring_rate=full_springs / n,
+        bomb_game_rate=bomb_games / n,
     )
 
 
@@ -163,7 +213,8 @@ def run_duplicate_permutations(hero: Agent, villains: Sequence[Agent],
     layouts = list(itertools.permutations(range(3)))
     records: List[GameRecord] = []
     wins = losses = springs = 0
-    score_sum = 0.0
+    partial_springs = full_springs = bomb_games = 0
+    score_sum = base_sum = spring_sum = bomb_sum = 0.0
     ms_sum = 0.0
     deals = list(deal_ids) if deal_ids is not None else [
         seed0 + d for d in range(n_deals)]
@@ -178,17 +229,34 @@ def run_duplicate_permutations(hero: Agent, villains: Sequence[Agent],
             st = GameState.from_hands(base.hands, current=base.current)
             st, avg_ms = play_game(agents, cfg, st, hero_seat=hero_seat)
             win = 1 if st.winner == hero_seat else 0
-            score = float(st.scores[hero_seat])
+            bd = score_breakdowns(
+                st.hands, st.tricks, st.bombs, st.winner, cfg)[hero_seat]
+            score = float(bd.total)
+            hero_bombs = sum(1 for p, m in st.action_log
+                             if p == hero_seat and m.type == MoveType.BOMB)
+            opp_bombs = sum(1 for p, m in st.action_log
+                            if p != hero_seat and m.type == MoveType.BOMB)
             records.append(GameRecord(
                 deal_id=deal_id, layout=layout_i, hero_seat=hero_seat,
-                win=win, score=score, ms=avg_ms))
+                win=win, score=score, ms=avg_ms, base=float(bd.base),
+                spring=float(bd.spring), bomb=float(bd.bomb),
+                spring_opponents=bd.spring_opponents,
+                full_spring=1 if bd.full_spring else 0,
+                hero_bombs=hero_bombs, opp_bombs=opp_bombs))
             wins += win
             losses += 1 - win
             score_sum += score
+            base_sum += bd.base
+            spring_sum += bd.spring
+            bomb_sum += bd.bomb
             ms_sum += avg_ms
-            if win and any(st.tricks[q] == 0 for q in range(3)
-                           if q != hero_seat):
+            bomb_games += int(hero_bombs > 0)
+            if win and bd.spring_opponents:
                 springs += 1
+                if bd.full_spring:
+                    full_springs += 1
+                else:
+                    partial_springs += 1
 
     n = len(records)
     return MatchReport(
@@ -196,6 +264,12 @@ def run_duplicate_permutations(hero: Agent, villains: Sequence[Agent],
         n=n, wins=wins, losses=losses, avg_score=score_sum / n,
         spring_rate=springs / wins if wins else 0.0, avg_ms=ms_sum / n,
         ci=wilson(wins, n), records=tuple(records),
+        avg_base=base_sum / n,
+        avg_spring=spring_sum / n,
+        avg_bomb=bomb_sum / n,
+        partial_spring_rate=partial_springs / n,
+        full_spring_rate=full_springs / n,
+        bomb_game_rate=bomb_games / n,
     )
 
 
@@ -210,33 +284,46 @@ def paired_bootstrap_diff(hero: MatchReport, baseline: MatchReport,
     if set(ha) != set(hb):
         raise ValueError("paired reports must share deals/layouts")
 
-    per_deal_w: Dict[int, List[float]] = {}
-    per_deal_s: Dict[int, List[float]] = {}
+    metrics = ("win", "score", "base", "spring", "bomb")
+    per_deal: Dict[str, Dict[int, List[float]]] = {
+        name: {} for name in metrics}
     for key, ra in ha.items():
         rb = hb[key]
-        per_deal_w.setdefault(key[0], []).append(float(ra.win - rb.win))
-        per_deal_s.setdefault(key[0], []).append(ra.score - rb.score)
+        vals = {
+            "win": float(ra.win - rb.win),
+            "score": ra.score - rb.score,
+            "base": ra.base - rb.base,
+            "spring": ra.spring - rb.spring,
+            "bomb": ra.bomb - rb.bomb,
+        }
+        for name, value in vals.items():
+            per_deal[name].setdefault(key[0], []).append(value)
 
-    deals = sorted(per_deal_w)
-    all_w = [x for d in deals for x in per_deal_w[d]]
-    all_s = [x for d in deals for x in per_deal_s[d]]
-    win_diff = sum(all_w) / len(all_w)
-    score_diff = sum(all_s) / len(all_s)
+    deals = sorted(per_deal["win"])
+    diffs = {}
+    for name in metrics:
+        all_v = [x for d in deals for x in per_deal[name][d]]
+        diffs[name] = sum(all_v) / len(all_v)
 
     rng = random.Random(seed)
-    boot_w, boot_s = [], []
+    boot = {name: [] for name in metrics}
     for _ in range(n_boot):
         sample = [deals[rng.randrange(len(deals))] for _ in deals]
-        bw = [x for d in sample for x in per_deal_w[d]]
-        bs = [x for d in sample for x in per_deal_s[d]]
-        boot_w.append(sum(bw) / len(bw))
-        boot_s.append(sum(bs) / len(bs))
-    boot_w.sort()
-    boot_s.sort()
+        for name in metrics:
+            vals = [x for d in sample for x in per_deal[name][d]]
+            boot[name].append(sum(vals) / len(vals))
     lo = int(0.025 * (n_boot - 1))
     hi = int(0.975 * (n_boot - 1))
+    cis = {}
+    for name in metrics:
+        boot[name].sort()
+        cis[name] = (boot[name][lo], boot[name][hi])
+
     return PairedDiff(
         n_deals=len(deals), n_games=len(ha),
-        win_diff=win_diff, win_ci=(boot_w[lo], boot_w[hi]),
-        score_diff=score_diff, score_ci=(boot_s[lo], boot_s[hi]),
+        win_diff=diffs["win"], win_ci=cis["win"],
+        score_diff=diffs["score"], score_ci=cis["score"],
+        base_diff=diffs["base"], base_ci=cis["base"],
+        spring_diff=diffs["spring"], spring_ci=cis["spring"],
+        bomb_diff=diffs["bomb"], bomb_ci=cis["bomb"],
     )
