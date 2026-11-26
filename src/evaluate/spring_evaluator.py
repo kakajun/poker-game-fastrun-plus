@@ -9,7 +9,6 @@ from stable_baselines3.common.monitor import Monitor
 
 from src.env.poker_env import PokerEnv
 from src.env.single_agent_wrapper import SingleAgentWrapper
-from src.agent.random_agent import RandomAgent
 from src.agent.heuristic_agent import HeuristicAgent
 from src.core.hand_type import HandType
 from src.core.card import Card, Rank
@@ -52,17 +51,14 @@ class SpringChallengeEvaluator:
             
         return sorted(hand, reverse=True)
 
-    def evaluate_model(self, model_path: str, model_name: str, opponent_type: str = "heuristic"):
+    def evaluate_model(self, model_path: str, model_name: str):
         """
-        评估模型，包含常规测试和春天挑战测试。
+        评估模型，包含常规测试和春天挑战测试。对手固定为启发式 Agent。
         """
-        print(f"\n--- 正在启动【春天挑战】评估: {model_name} 对战 {opponent_type} ---")
+        print(f"\n--- 正在启动【春天挑战】评估: {model_name} 对战 heuristic ---")
         
         base_env = PokerEnv()
-        if opponent_type == "random":
-            opponents = [RandomAgent(base_env.action_space.n), RandomAgent(base_env.action_space.n)]
-        else:
-            opponents = [HeuristicAgent(), HeuristicAgent()]
+        opponents = [HeuristicAgent(), HeuristicAgent()]
             
         env = SingleAgentWrapper(base_env, opponents=opponents)
         
@@ -134,7 +130,7 @@ class SpringChallengeEvaluator:
 
         summary = {
             "模型": model_name,
-            "对手": opponent_type,
+            "对手": "heuristic",
             "总胜率": stats["wins"] / stats["total_episodes"],
             "总体春天率": stats["springs"] / max(1, stats["wins"]),
             "春天挑战达成率": stats["challenge_springs"] / max(1, stats["challenge_attempts"]),
@@ -179,6 +175,6 @@ if __name__ == "__main__":
     models = [f for f in os.listdir(model_dir) if f.endswith(".zip")]
     
     for m in models:
-        evaluator.evaluate_model(os.path.join(model_dir, m), m, opponent_type="heuristic")
+        evaluator.evaluate_model(os.path.join(model_dir, m), m)
         
     evaluator.save_report("src/evaluate/reports")
