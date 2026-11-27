@@ -18,9 +18,10 @@ from .fast_service import describe, play_to_model
 from .models import AIActionThinkingModel, AIThinkingModel
 
 MODELS = ["m2-rule", "m2-search"]
+POLICY_NAME = "policy-v4"
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-DEFAULT_POLICY_PATH = os.path.join(_ROOT, "models", "policy_v3.pt")
+DEFAULT_POLICY_PATH = os.path.join(_ROOT, "models", "policy_v4.pt")
 
 
 class AIService:
@@ -32,17 +33,20 @@ class AIService:
         self.policy = M1Policy(cfg, endgame_cards=8, endgame_k=6,
                                guaranteed_lead=False)
         self.neural = None
+        # 训练模型存在时默认启用；加载失败自动留在 m2-rule，坏模型不上线
+        if os.path.exists(self.policy_path):
+            self.load_model(POLICY_NAME)
 
     # ------------------------------------------------------------------
 
     def list_models(self) -> List[str]:
         models = list(MODELS)
         if os.path.exists(self.policy_path):
-            models.append("policy-v3")
+            models.insert(0, POLICY_NAME)
         return models
 
     def load_model(self, name: str) -> bool:
-        if name == "policy-v3":
+        if name == POLICY_NAME:
             if not os.path.exists(self.policy_path):
                 print(f"policy checkpoint missing: {self.policy_path}")
                 return False
@@ -51,7 +55,7 @@ class AIService:
                                     device="cpu")
                 agent._load()  # 显式验证 metadata/维度，坏模型不进入线上
             except Exception as exc:
-                print(f"policy-v3 load failed: {exc}")
+                print(f"{POLICY_NAME} load failed: {exc}")
                 return False
             self.current_model = name
             self.neural = agent
