@@ -8,7 +8,7 @@
 import os
 from typing import Dict, List, Optional, Tuple
 
-from ..arena.agents import PolicyAgent
+from ..arena.numpy_agent import NumpyPolicyAgent
 from ..eval.decompose import min_steps
 from ..eval.policy_m1 import M1Policy
 from ..fastrun.config import DEFAULT_RULES, RuleConfig
@@ -21,7 +21,8 @@ MODELS = ["m2-rule", "m2-search"]
 POLICY_NAME = "policy-v4"
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-DEFAULT_POLICY_PATH = os.path.join(_ROOT, "models", "policy_v4.pt")
+# 纯 numpy 权重：运行镜像不需要 torch（.pt 只用于开发机导出/训练）
+DEFAULT_POLICY_PATH = os.path.join(_ROOT, "models", "policy_v4.npz")
 
 
 class AIService:
@@ -51,8 +52,7 @@ class AIService:
                 print(f"policy checkpoint missing: {self.policy_path}")
                 return False
             try:
-                agent = PolicyAgent(self.cfg, model_path=self.policy_path,
-                                    device="cpu")
+                agent = NumpyPolicyAgent(self.cfg, npz_path=self.policy_path)
                 agent._load()  # 显式验证 metadata/维度，坏模型不进入线上
             except Exception as exc:
                 print(f"{POLICY_NAME} load failed: {exc}")
