@@ -62,17 +62,18 @@ class ActionSpace:
         self._add_action_abstract(self.pass_action.type, self.pass_action.length, self.pass_action.max_rank)
         idx += 1
 
-        # 构造全牌堆 (45张，去花色)
+        # 构造全牌堆 (48张，去花色)
         full_deck_cards = []
         # 3-Q (4张)
         for r in range(3, 13):
             for i in range(4):
                 full_deck_cards.append(Card(Rank(r), i))
-        # K (3张)
-        for i in range(3):
+        # K (4张)
+        for i in range(4):
             full_deck_cards.append(Card(Rank.KING, i))
-        # A (1张)
-        full_deck_cards.append(Card(Rank.ACE, 0))
+        # A (3张)
+        for i in range(3):
+            full_deck_cards.append(Card(Rank.ACE, i))
         # 2 (1张)
         full_deck_cards.append(Card(Rank.TWO, 0))
 

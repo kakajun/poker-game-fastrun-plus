@@ -1,0 +1,111 @@
+{
+  "model_type": "policy_v3",
+  "feature_version": "v4",
+  "action_version": "v4",
+  "engine_version": "fastrun-v3",
+  "rule_hash": "e036e2904486",
+  "state_dim": 97,
+  "move_dim": 28,
+  "history_steps": 128,
+  "event_dim": 8,
+  "history_mode": "flatten",
+  "hidden": 320,
+  "samples": 17170,
+  "val_samples": 5924,
+  "train_deals": 4000,
+  "val_deals": 1380,
+  "seed": 2,
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "loss": "listwise",
+  "objective_mode": "score_primary",
+  "objective_version": "v1",
+  "train_win_guard": 0.01,
+  "win_weight": 1.0,
+  "win_tolerance": 0.005,
+  "win_temp": 0.2,
+  "score_temp": 0.15,
+  "aux_weight": 0.1,
+  "deploy": {
+    "artifact": "models/policy_v4.pt",
+    "source": "models/policy_v4_r7b.pt",
+    "trained_from": "models/policy_v4_r7.pt",
+    "win_guard": 0.005,
+    "endgame_cards": 14,
+    "endgame_k": 6,
+    "note": "检查点元数据已写入 win_guard/endgame_cards/endgame_k，PolicyAgent 无需额外参数即可复现",
+    "train_data": [
+      "data/cf_v4_r2.{train,val}.w*.npz",
+      "data/cf_v4_r3.{train,val}.w*.npz",
+      "data/cf_v4_r5.{train,val}.w*.npz",
+      "data/cf_v4_r6.{train,val}.w*.npz"
+    ],
+    "gate_test_data": "data/cf_v4_r6.test.w*.npz",
+    "gate_test_note": "该冻结分片在此之前未被任何调参或评估使用"
+  },
+  "val": {
+    "loss": 4.655014701021595,
+    "regret_win": 0.16455660479685327,
+    "regret_score": 0.1473094379475276,
+    "spring_mean": 0.03193225325220425,
+    "bomb_mean": 0.009528096782887489,
+    "full_spring_rate": 0.009171730894683424,
+    "pairwise_acc": 0.7226295216047844,
+    "n": 5924
+  },
+  "gate": {
+    "deals": 1034,
+    "games_per_opponent": 6204,
+    "layouts": 6,
+    "bootstrap": 4000,
+    "seed": 131,
+    "baseline": "m2",
+    "opponents": {
+      "greedy": {
+        "win": 0.612,
+        "win_delta": 0.0458,
+        "win_ci": [0.0290, 0.0622],
+        "score": 7.30,
+        "score_delta": 0.918,
+        "score_ci": [0.527, 1.332],
+        "base_delta": 0.879,
+        "spring_delta": 0.039,
+        "bomb_delta": 0.000,
+        "spring_rate": 0.030,
+        "partial_spring_rate": 0.010,
+        "full_spring_rate": 0.009,
+        "bomb_game_rate": 0.065,
+        "ms_p99": 27.86,
+        "pass": true
+      },
+      "m2": {
+        "win": 0.347,
+        "win_delta": 0.0132,
+        "win_ci": [0.0006, 0.0261],
+        "score": 0.50,
+        "score_delta": 0.502,
+        "score_ci": [0.121, 0.882],
+        "base_delta": 0.448,
+        "base_ci": [0.192, 0.702],
+        "spring_delta": 0.019,
+        "spring_ci": [-0.174, 0.213],
+        "bomb_delta": 0.035,
+        "bomb_ci": [-0.077, 0.148],
+        "spring_rate": 0.071,
+        "partial_spring_rate": 0.016,
+        "full_spring_rate": 0.009,
+        "bomb_game_rate": 0.069,
+        "ms_p99": 24.13,
+        "pass": true
+      }
+    },
+    "thresholds": {
+      "score_ci_lower_gt": 0.0,
+      "win_ci_lower_gt": -0.01,
+      "ms_p99_max": 300.0
+    }
+  }
+}

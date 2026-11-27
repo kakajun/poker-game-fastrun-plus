@@ -1,4 +1,6 @@
 # 训练专用额外库 (Training specific extra libraries)
+torch>=2.2
+numpy>=1.26
 tensorboard
 stable-baselines3
 sb3-contrib

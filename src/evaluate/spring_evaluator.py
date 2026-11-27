@@ -9,9 +9,7 @@ from stable_baselines3.common.monitor import Monitor
 
 from src.env.poker_env import PokerEnv
 from src.env.single_agent_wrapper import SingleAgentWrapper
-from src.agent.random_agent import RandomAgent
 from src.agent.heuristic_agent import HeuristicAgent
-from src.agent.model_agent import ModelAgent
 from src.core.hand_type import HandType
 from src.core.card import Card, Rank
 
@@ -46,36 +44,35 @@ class SpringChallengeEvaluator:
         # 大单张 2
         hand.append(Card(Rank.TWO))
         
-        # 确保正好15张
-        while len(hand) < 15:
+        # 确保正好16张
+        while len(hand) < 16:
             # 补点大牌
             hand.append(Card(Rank.ACE))
             
         return sorted(hand, reverse=True)
 
-    def evaluate_model(self, model_path: str, model_name: str, opponent_type: str = "heuristic"):
+    def evaluate_model(self, model_path: str, model_name: str):
         """
-        评估模型，包含常规测试和春天挑战测试。
+        评估模型，包含常规测试和春天挑战测试。对手固定为启发式 Agent。
         """
-        print(f"\n--- 正在启动【春天挑战】评估: {model_name} 对战 {opponent_type} ---")
+        print(f"\n--- 正在启动【春天挑战】评估: {model_name} 对战 heuristic ---")
         
         base_env = PokerEnv()
-        if opponent_type == "random":
-            opponents = [RandomAgent(base_env.action_space.n), RandomAgent(base_env.action_space.n)]
-        else:
-            opponents = [HeuristicAgent(), HeuristicAgent()]
+        opponents = [HeuristicAgent(), HeuristicAgent()]
             
         env = SingleAgentWrapper(base_env, opponents=opponents)
         
-        # 2. 加载模型
+        # 2. 加载模型并检查维度
         try:
-            agent = ModelAgent(model_path)
-            # ModelAgent handles dimension mismatch internally now
-            # if model_obs_shape != env_obs_shape:
-            #     print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
-            #     return None
+            model = MaskablePPO.load(model_path)
+            model_obs_shape = model.observation_space.shape
+            env_obs_shape = env.observation_space.shape
+
+            if model_obs_shape != env_obs_shape:
+                print(f"跳过不匹配的模型 {model_name}: 维度 {model_obs_shape} != 环境维度 {env_obs_shape}")
+                return None
             
-            # model.set_env(env)
+            model.set_env(env)
         except Exception as e:
             print(f"无法加载模型 {model_path}: {e}")
             return None
@@ -109,10 +106,11 @@ class SpringChallengeEvaluator:
             steps = 0
             
             while not (terminated or truncated):
-                mask = info.get("action_mask")
+                mask = env.action_masks()
+                action, _ = model.predict(obs, action_masks=mask, deterministic=True)
                 
-                # Use ModelAgent act
-                action = agent.act(obs, mask, env.unwrapped.game)
+                if isinstance(action, np.ndarray):
+                    action = action.item()
                 
                 obs, reward, terminated, truncated, info = env.step(action)
                 steps += 1
@@ -132,7 +130,7 @@ class SpringChallengeEvaluator:
 
         summary = {
             "模型": model_name,
-            "对手": opponent_type,
+            "对手": "heuristic",
             "总胜率": stats["wins"] / stats["total_episodes"],
             "总体春天率": stats["springs"] / max(1, stats["wins"]),
             "春天挑战达成率": stats["challenge_springs"] / max(1, stats["challenge_attempts"]),
@@ -174,10 +172,9 @@ class SpringChallengeEvaluator:
 if __name__ == "__main__":
     evaluator = SpringChallengeEvaluator(n_episodes=50)
     model_dir = "models"
-    # 支持 PPO (.zip) 和 MCCFR (.pth, .pkl)
-    models = [f for f in os.listdir(model_dir) if f.endswith(".zip") or f.endswith(".pth") or f.endswith(".pkl")]
+    models = [f for f in os.listdir(model_dir) if f.endswith(".zip")]
     
     for m in models:
-        evaluator.evaluate_model(os.path.join(model_dir, m), m, opponent_type="heuristic")
+        evaluator.evaluate_model(os.path.join(model_dir, m), m)
         
     evaluator.save_report("src/evaluate/reports")

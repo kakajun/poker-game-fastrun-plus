@@ -22,6 +22,7 @@ export const useGameStore = defineStore('game', {
     lastPlayerIndex: null,
     deck: [],
     winnerId: null,
+    thinking: undefined,
   }),
 
   getters: {
@@ -53,6 +54,7 @@ export const useGameStore = defineStore('game', {
       this.winnerId = backendState.winner !== -1 ? (backendState.winner === 0 ? 'human' : `ai-${backendState.winner}`) : null;
       this.currentPlayerIndex = backendState.current_player;
       this.lastPlayerIndex = backendState.last_play_player; // If -1 means no one played yet?
+      this.thinking = backendState.thinking;
 
       // 2. Last Played Cards
       if (backendState.last_play) {

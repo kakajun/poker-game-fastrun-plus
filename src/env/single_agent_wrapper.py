@@ -3,7 +3,6 @@ import numpy as np
 import random
 import os
 from typing import List, Optional, Tuple, Dict, Any
-from src.agent.random_agent import RandomAgent
 from src.agent.heuristic_agent import HeuristicAgent
 from src.agent.model_agent import ModelAgent
 
@@ -12,7 +11,7 @@ class SingleAgentWrapper(gym.Wrapper):
     将 3人 PokerEnv 包装为单人训练环境。
     - 训练 Agent 固定为 Player 0。
     - 其他 2 个位置由 opponent_agents 控制。
-    - 支持混合对手：RandomAgent, HeuristicAgent 和历史最优模型 (Self-Play)。
+    - 对手仅使用 HeuristicAgent 和历史最优模型 (Self-Play)，不使用随机出牌对手。
     """
 
     def __init__(self, env: gym.Env, opponents: List = None, mixed_opponents: bool = True, self_play_prob: float = 0.3):
@@ -24,10 +23,6 @@ class SingleAgentWrapper(gym.Wrapper):
         self.self_play_prob = self_play_prob
 
         # 初始化对手库
-        self.random_opponents = [
-            RandomAgent(env.action_space.n),
-            RandomAgent(env.action_space.n)
-        ]
         self.heuristic_opponents = [
             HeuristicAgent(),
             HeuristicAgent()
@@ -40,7 +35,7 @@ class SingleAgentWrapper(gym.Wrapper):
         if opponents is not None:
             self.opponents = opponents
         else:
-            self.opponents = self.random_opponents
+            self.opponents = self.heuristic_opponents
 
         self.last_action_mask = None
 
@@ -79,17 +74,13 @@ class SingleAgentWrapper(gym.Wrapper):
         if self.mixed_opponents:
             rand = random.random()
 
-            # 优先尝试 Self-Play (30% 概率)
+            # Self-Play 概率对历史最优模型，其余对启发式
             self_play_agents = self._get_latest_model_agents() if rand < self.self_play_prob else None
 
             if self_play_agents:
                 self.opponents = self_play_agents
-            elif rand < (self.self_play_prob + (1 - self.self_play_prob) * 0.5):
-                # 剩下的概率中 50% 启发式
-                self.opponents = self.heuristic_opponents
             else:
-                # 剩下的随机
-                self.opponents = self.random_opponents
+                self.opponents = self.heuristic_opponents
 
         # 重置环境
         obs, info = self.env.reset(seed=seed, options=options)

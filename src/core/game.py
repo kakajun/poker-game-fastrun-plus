@@ -85,7 +85,7 @@ class Game:
             # 下家报单
             # 找出我手牌最大的单张 rank
             if hand:
-                max_rank_in_hand = hand[-1].rank  # Hand is sorted
+                max_rank_in_hand = hand[0].rank  # 手牌按点数降序，最大牌在首位
 
                 filtered = []
                 for a in actions:

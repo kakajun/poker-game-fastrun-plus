@@ -15,6 +15,19 @@ export interface PlayModel {
   max_rank: number;
 }
 
+export interface ThinkingActionModel {
+  play: string;
+  regret: number;
+  prob: number;
+  cards: number[];
+}
+
+export interface ThinkingModel {
+  player_idx: number;
+  top_actions: ThinkingActionModel[];
+  chosen_play: string;
+}
+
 export interface GameStateModel {
   game_id: string;
   current_player: number;
@@ -27,6 +40,7 @@ export interface GameStateModel {
   cards_played_count: number[];
   bomb_scores: number[];
   legal_actions: PlayModel[];
+  thinking?: ThinkingModel;
 }
 
 export const gameApi = {

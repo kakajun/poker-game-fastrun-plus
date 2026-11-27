@@ -14,10 +14,10 @@ class Deck:
 
     def build(self):
         """
-        构建跑得快专用的牌堆 (45张)
+        构建跑得快专用的牌堆 (48张)
         3-Q: 各 4 张 (共 40 张)
-        K: 3 张
-        A: 1 张
+        K: 4 张
+        A: 3 张
         2: 1 张
         """
         self.cards = []
@@ -28,24 +28,25 @@ class Deck:
             for i in range(4):
                 self.cards.append(Card(rank, i))
 
-        # K (13) - 3 张
-        for i in range(3):
+        # K (13) - 4 张
+        for i in range(4):
             self.cards.append(Card(Rank.KING, i))
 
-        # A (14) - 1 张
-        self.cards.append(Card(Rank.ACE, 0))
+        # A (14) - 3 张
+        for i in range(3):
+            self.cards.append(Card(Rank.ACE, i))
 
         # 2 (15) - 1 张
         self.cards.append(Card(Rank.TWO, 0))
 
         # 校验数量
-        assert len(self.cards) == 45, f"Deck size should be 45, but got {len(self.cards)}"
+        assert len(self.cards) == 48, f"Deck size should be 48, but got {len(self.cards)}"
 
     def shuffle(self):
         """洗牌"""
         random.shuffle(self.cards)
 
-    def deal(self, num_players: int = 3, cards_per_player: int = 15):
+    def deal(self, num_players: int = 3, cards_per_player: int = 16):
         """发牌"""
         if len(self.cards) < num_players * cards_per_player:
             raise ValueError("Not enough cards in deck")

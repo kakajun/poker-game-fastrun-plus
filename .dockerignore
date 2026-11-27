@@ -1,20 +1,30 @@
+# 依赖与构建产物（node_modules_broken 是权限损坏的旧目录，绝对不能进 context）
+**/node_modules
+front/node_modules_broken
+front/dist
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# 版本控制 / 编辑器
 .git
 .github
-.trae
 .vscode
-front
-docs
+.trae
+
+# 测试与文档
 tests
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.env
-.venv
-venv
-env
+.pytest_cache
+**/*.md
+
+# 本地临时日志
+_*.log
+_*.err
+
+# 训练数据（体积大，镜像里不需要）
+data
+
+# 仅本地使用的环境脚本
 environment.yml
 setup_env.ps1
-README.md
-ProjectProposal.md
-mainRule.md

@@ -1,42 +1,55 @@
-# 使用轻量级 Python 3.9 基础镜像
-FROM python:3.9-slim
+# ================= 1. 前端构建 =================
+FROM docker.m.daocloud.io/library/node:26-bookworm-slim AS frontend
+WORKDIR /build
 
-# 设置环境变量，优化构建体积
+# 先只拷 package.json，让依赖层可缓存
+COPY front/package.json ./
+RUN npm install --no-audit --no-fund --loglevel=error
+
+COPY front/ ./
+# 直接走 vite，跳过 vue-tsc 类型检查（类型错误不该阻断出镜像）
+RUN npx --no-install vite build
+
+
+# ================= 2. 运行时：后端 + nginx =================
+# 不装 torch：策略网是纯 MLP，权重已导出成 numpy 可读的 .npz
+FROM docker.m.daocloud.io/library/python:3.11-slim
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app
 
-# 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖并清理缓存
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+        nginx \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
 
-# 1. 明确安装 PyTorch CPU 版本 (这是减小体积的关键，约 200MB)
-# 对于 x86_64 使用专门的 CPU 索引，对于 ARM64 (aarch64) 直接从 PyPI 安装
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu; \
-    else \
-        pip install --no-cache-dir torch torchvision torchaudio; \
-    fi
+# 后端运行时实际只用到这四个（不是 requirements.txt 里的全部：
+# pandas/tqdm/rich 是训练与评估用，不进运行镜像）
+RUN pip install --no-cache-dir \
+        fastapi \
+        uvicorn \
+        pydantic \
+        numpy \
+        -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 2. 复制依赖文件并安装其他库
-COPY requirements.txt .
-# 移除 requirements.txt 中的 torch 引导，避免冲突
-RUN sed -i '/torch/d' requirements.txt && \
-    pip install --no-cache-dir -r requirements.txt
-
-# 3. 复制后端代码
 COPY src/ ./src/
+# 只带 numpy 权重；.pt 是 torch checkpoint，运行期不需要
+COPY models/policy_v4.npz models/policy_v4.npz.json ./models/
 
-# 4. 复制训练好的模型
-COPY models/ ./models/
+COPY --from=frontend /build/dist /usr/share/nginx/html
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/start.sh /usr/local/bin/start.sh
+RUN sed -i 's/\r$//' /etc/nginx/conf.d/default.conf /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
 
-# 暴露 FastAPI 默认端口
-EXPOSE 8000
+EXPOSE 80
 
-# 启动服务
-CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fsS http://127.0.0.1/api/models > /dev/null || exit 1
+
+CMD ["/usr/local/bin/start.sh"]

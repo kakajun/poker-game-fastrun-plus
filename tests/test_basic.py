@@ -11,7 +11,7 @@ def test_deck():
     print("Testing Deck...")
     deck = Deck()
     print(f"Deck size: {len(deck.cards)}")
-    assert len(deck.cards) == 45
+    assert len(deck.cards) == 48
     
     # Check specific cards
     # Should have Heart 2
