@@ -1,133 +1,120 @@
-# Poker Game FastRun AI (跑得快 AI)
+# Poker Game FastRun AI（跑得快 AI）
 
-这是一个基于前沿博弈论算法 **VAD-CFR (Volatility-Adaptive Discounted Counterfactual Regret Minimization)** 的跑得快游戏 AI 项目。
-VAD-CFR 是由 DeepMind 通过 AlphaEvolve 自动进化出的新一代算法，专门针对非完全信息博弈中的波动性进行了优化，相比传统 CFR 具有更快的收敛速度和更强的策略稳定性。
+三人跑得快 AI 工程：规则引擎、合法信息集编码、全动作策略网、numpy 推理服务与前端页面。
 
-包含核心游戏引擎、VAD-CFR 训练管线、FastAPI 后端服务以及 Vue 3 前端界面。
+规则口径见 `mainRule.md`：48 张无花色牌（3-K 各 4 张、A 3 张、2 1 张），每人 16 张，**必压 + 顶大 + 无下注**。计分含基础分、炸弹（+20/-10）与春天（±30）。
 
-## 🎯 项目成果
+> 历史文档 `VAD_CFR_Architecture.md` / `MCCFR_TRANSFORMATION_PLAN.md` 记录的是早期探索，不代表当前线上策略。当前部署的是 `policy_v4` 策略网。
 
-- **核心算法**: VAD-CFR (波动适应折扣反事实遗憾最小化)
-- **技术亮点**: 非对称瞬时提升 (Asymmetric Boosting) + 波动适应折扣 (Volatility-Adaptive Discounting) + 硬热启动 (Hard Warm-Start)
-- **技术栈**: Python 3.9, PyTorch (GPU 加速), FastAPI, Vue 3, TypeScript
+## 当前线上策略
 
-## 📂 目录结构
+| 项 | 值 |
+|---|---|
+| 模型 | `models/policy_v4.pt` → 运行期用 `models/policy_v4.npz` |
+| 网络 | `PolicyNetV3`（flatten 历史，**纯 MLP**） |
+| 输入 | state 97 维 + 有序历史 128×8 + 每个合法动作 28 维 |
+| 决策 | 全部合法动作打分；净分优先 + 胜率守卫 `win_guard=0.005`；残局用精确解（`endgame_cards=14`, `k=6`） |
+| 推理 | **numpy 前向，运行镜像不含 torch** |
+| gate 实测 | 对 greedy 胜率 61.2%（+4.58pt，CI [0.029, 0.062]）；对 m2 净分 +0.50（CI [0.121, 0.882]） |
 
-```
-poker-game-fastrun/
-├── src/                # 后端源码
-│   ├── algo/           # 算法实现
-│   │   └── vad_cfr/    # VAD-CFR 核心逻辑 (网络模型、训练器)
-│   ├── core/           # 游戏核心逻辑 (规则、发牌、判胜)
-│   ├── env/            # 环境封装 (ActionSpace, Observation)
-│   ├── agent/          # AI 代理 (ModelAgent)
-│   ├── api/            # FastAPI 服务接口
-│   └── train_vad_cfr.py # VAD-CFR 训练脚本
-├── front/              # 前端源码 (Vue 3 + Vite)
-├── models/             # 训练好的模型文件 (.pth)
-├── tests/              # 单元测试
-└── environment.yml     # Conda 环境配置
-```
+完整评测与阈值见 `models/policy_v4.pt.json` 的 `gate` 字段。
 
-## 🚀 快速开始
+## 快速开始
 
-### 1. 环境准备
+### 方式 A：直接跑镜像（推荐）
 
-确保已安装 Conda。
+镜像已打包为工程根目录的 `poker-fastrun.tar.gz`（约 83MB，加载后 356MB），单容器同时提供前端页面和 API：
 
 ```bash
-# 创建并激活环境
-conda env create -f environment.yml
-conda activate poker-rl
-
-# 如果需要手动安装核心依赖 (Windows)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118  # 根据 CUDA 版本选择
-pip install fastapi uvicorn pydantic numpy pandas matplotlib
+docker load -i poker-fastrun.tar.gz
+docker run -d -p 9551:80 --restart unless-stopped --name poker-fastrun poker-fastrun:latest
 ```
 
-### 2. 启动后端服务
+浏览器打开 `http://localhost:9551`。后端 API 见下表；FastAPI 文档仅在容器内 `http://127.0.0.1:8000/docs`，未对外映射。
 
-后端提供游戏逻辑和 AI 推理接口。
+### 方式 B：从源码构建镜像
 
 ```bash
-python -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+# 国内网络：用 daocloud 镜像源
+docker build --build-arg BASE_PREFIX=docker.m.daocloud.io/library/ -t poker-fastrun:latest .
+
+# GitHub Actions / 海外网络：默认走 docker.io 官方镜像
+docker build -t poker-fastrun:latest .
 ```
 
-服务启动后，API 文档位于: `http://localhost:8000/docs`
+多阶段构建：前端 `vite build` → `dist/`，运行时 Python 3.11-slim + nginx，nginx 托管静态页并把 `/api/` 反代到本地 uvicorn（8000）。history 路由刷新由 `try_files ... /index.html` 兜住。
 
-### 3. 启动前端界面
+### 方式 C：本地开发（前后端分离）
 
-前端提供可视化的游戏交互。
+后端需要 Python 与 numpy/fastapi/uvicorn/pydantic；**只有重新导出权重或训练时才需要 torch**：
 
 ```bash
-# 进入前端目录
+pip install fastapi uvicorn pydantic numpy
+PYTHONPATH=. python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+```
+
+前端（Node 18+）：
+
+```bash
 cd front
-
-# 安装依赖
 npm install
-
-# 启动开发服务器
-npm run dev
+npm run dev          # http://localhost:5173，/api 代理到 8000
 ```
 
-浏览器访问: `http://localhost:5173`
+## API
 
-### 4. 训练 AI (VAD-CFR)
+| 端点 | 说明 |
+|---|---|
+| `GET /models` | 可用模型：`policy-v4`、`m2-rule`、`m2-search` |
+| `POST /game/start` | 开局，body `{"model_name":"policy-v4"}` |
+| `GET /game/{id}/state` | 当前状态 |
+| `POST /game/{id}/action` | 人类出牌，body `{"card_ids":[...]}` |
+| `POST /game/{id}/ai` | AI 走一步，返回状态与 `thinking.top_actions` |
 
-项目采用 VAD-CFR 算法进行自博弈训练。支持多进程异步采样与 GPU 集中训练。
+## 重新导出模型权重
+
+训练产出 `.pt` 后，必须重新导出 npz，运行镜像才能用上新权重：
 
 ```bash
+# 开发机（需 torch）
+PYTHONPATH=. python tools/export_npz.py models/policy_v4.pt
 
-$env:PYTHONPATH="."; python src/train_vad_cfr.py
+# 校验 numpy 前向与 torch 一致
+PYTHONPATH=. python tools/verify_numpy_net.py models/policy_v4.pt
 ```
 
-- **输出**: `models/vad_cfr.pth` (包含 `_best` 和 `_pruned` 版本)
-- **特点**:
-    - **Asymmetric Boosting**: 对有潜力的动作进行 1.1 倍概率放大。
-    - **Volatility-Adaptive**: 根据遗憾值的幅度动态调整样本权重。
-    - **Hard Warm-Start**: 前 500 轮仅训练遗憾网络，避免早期噪声干扰。
+导出脚本只支持 `history_mode="flatten"`。`.pt` 不会被打进运行镜像。
 
-## 📊 模型评估 (Model Evaluation)
+## 目录
 
-项目提供了多维度的模型评估工具，用于量化 AI 的竞技水平和策略质量。
-
-### 1. 评估维度
-- **竞技表现**: 胜率、平均得分、春天率。
-- **策略质量**: 顶大规则遵守率、炸弹使用频率。
-- **效率**: 获胜平均步数。
-
-### 2. 运行评估
-
-```bash
-$env:PYTHONPATH="."; python src/evaluate/evaluator.py
+```text
+src/
+├── fastrun/          # 不可变状态机、规则、动作生成
+├── core/             # 旧引擎（可变形，不用于 CFR/搜索）
+├── eval/             # 拆牌手数、控制权、计分目标、M1 规则策略
+├── net/              # encode_v3 (97/28)、PolicyNetV3、numpy_model
+├── arena/            # Agent：规则/搜索/策略网/NumpyPolicyAgent
+├── search/           # PIMC、残局 max-n 精确解
+├── api/              # FastAPI 服务
+└── train_*.py        # 训练入口
+tools/                # 竞技场、数据生成、权重导出与校验
+front/                # Vue 3 + Vite
+deploy/               # nginx.conf、start.sh
+models/               # policy_v4.pt / .npz / 元数据
 ```
 
-评估结果（CSV 报表与可视化对比图）将自动生成在 `src/evaluate/reports/` 目录下。
+## 评测与 CI
 
-## 🧠 核心逻辑
+- 竞技场：`tools/arena_m1.py`、`tools/arena_m3.py`，按 deal 聚类做 paired bootstrap。
+- 模型评测：`src/evaluate/evaluator.py`，报表输出到 `src/evaluate/reports/`。
+- CI：push 到 `main` 或打 `v*.*.*` 标签时，GitHub Actions 构建 amd64/arm64 镜像并推送到 `ghcr.io`。
 
-### 状态空间 (Observation)
-- **57 维精简向量**: 移除了花色属性，仅保留点数逻辑。
-- **手牌 (15维)**: 各点数 (3-2) 的张数计数。
-- **剩余牌数 (2维)**: 对手手牌数量归一化。
-- **上家出牌 (15维)**: 上一手打出的各点数张数。
-- **上家牌型 (10维)**: 牌型的 One-hot 编码。
-- **已出牌统计 (15维)**: **关键信息**，全场已打出的各点数张数统计（用于算牌）。
+## 注意事项
 
-### 动作空间 (Action)
-- **252 维离散空间**: 包含 Pass 和所有可能的合法牌型抽象。
-- **Masking**: 使用 Action Masking 技术屏蔽非法动作。
+- 规则是 3 人且「保本」使计分非严格零和，因此**不能声称收敛到纳什均衡**；当前指标是净分与胜率。
+- 容器默认没有鉴权。公网部署时请限制安全组来源 IP，或在前面加带认证的反向代理。
+- `PLAN.md` 是 v2 迭代计划，含验收门槛与消融矩阵；改动策略请先读它。
 
-### 奖励函数 (Reward)
-- **胜负**: +100 / -100
-- **步数惩罚**: 每步 -1 (鼓励快速出完)
-- **炸弹奖励**: +20 (实时结算)
-- **输家惩罚**: -剩余牌数 (基础分)
+## 许可证
 
-## 🤝 贡献
-
-欢迎提交 Issue 和 PR！
-
-## 📄 许可证
-
-MIT License
+MIT

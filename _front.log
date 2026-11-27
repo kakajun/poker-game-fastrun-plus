@@ -1,0 +1,14 @@
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m3752[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+  ➜  Vue Inspector: Press Ctrl(^)+Shift(⇧) in App to toggle the Inspector
+
+[2m11:01:42[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/style.css, /src/pages/HomePage.vue, /src/pages/GamePage.vue[22m
+[2m11:01:42[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/style.css, /src/pages/GamePage.vue[22m
+[2m11:01:42[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/style.css, /src/pages/GamePage.vue, /src/components/Card.vue[22m
+[2m11:01:42[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/GamePage.vue, /src/style.css[22m
+[2m11:01:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/style.css, /src/pages/HomePage.vue, /src/pages/GamePage.vue[22m
+[2m11:01:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/style.css, /src/pages/GamePage.vue[22m
+[2m11:01:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/style.css, /src/pages/GamePage.vue, /src/components/Card.vue[22m
+[2m11:01:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/GamePage.vue, /src/style.css[22m

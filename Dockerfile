@@ -1,5 +1,9 @@
+# 本地构建传 --build-arg BASE_PREFIX=docker.m.daocloud.io/library/ 走国内源；
+# CI/海外默认用 docker.io 官方镜像（且官方镜像支持 amd64/arm64 多架构）。
+ARG BASE_PREFIX=
+
 # ================= 1. 前端构建 =================
-FROM docker.m.daocloud.io/library/node:26-bookworm-slim AS frontend
+FROM ${BASE_PREFIX}node:26-bookworm-slim AS frontend
 WORKDIR /build
 
 # 先只拷 package.json，让依赖层可缓存
@@ -13,7 +17,8 @@ RUN npx --no-install vite build
 
 # ================= 2. 运行时：后端 + nginx =================
 # 不装 torch：策略网是纯 MLP，权重已导出成 numpy 可读的 .npz
-FROM docker.m.daocloud.io/library/python:3.11-slim
+ARG BASE_PREFIX=
+FROM ${BASE_PREFIX}python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
